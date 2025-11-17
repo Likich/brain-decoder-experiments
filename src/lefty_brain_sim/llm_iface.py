@@ -31,16 +31,26 @@ class LLMOutput:
 
 
 class LocalDecoderNet(nn.Module):
-    def __init__(self, in_dim: int, hidden_dim: int = 128, num_classes: int = 5):
+    def __init__(
+        self,
+        in_dim: int,
+        hidden_dim: int = 128,
+        num_layers: int = 2,
+        num_classes: int = 5,
+        dropout: float = 0.1,
+    ):
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(in_dim, hidden_dim),
-            nn.ReLU(),
-            nn.LayerNorm(hidden_dim),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, num_classes),  # logits over 5 classes
-        )
+        layers = []
+        dim = in_dim
+        for _ in range(max(0, num_layers)):
+            layers.append(nn.Linear(dim, hidden_dim))
+            layers.append(nn.ReLU())
+            layers.append(nn.LayerNorm(hidden_dim))
+            if dropout > 0:
+                layers.append(nn.Dropout(dropout))
+            dim = hidden_dim
+        layers.append(nn.Linear(dim, num_classes))
+        self.net = nn.Sequential(*layers)
 
     def forward(self, x):
         return self.net(x)
@@ -58,7 +68,7 @@ class LocalDecoderLLM:
         meta_path: str = "models/brain_decoder_meta.json",
         device: str = "cpu",
     ):
-        ckpt = torch.load(ckpt_path, map_location=device)
+        ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
         in_dim = ckpt["in_dim"]
 
         # Load meta to get class names (should be 5 fruits)
@@ -72,11 +82,29 @@ class LocalDecoderLLM:
             f"but got {len(self.class_names)} class_names in meta."
         )
 
-        self.model = LocalDecoderNet(in_dim=in_dim, num_classes=num_classes)
+        hidden_dim = int(ckpt.get("hidden_dim", 128))
+        num_layers = int(ckpt.get("num_layers", 2))
+        dropout = float(ckpt.get("dropout", 0.0))
+
+        self.model = LocalDecoderNet(
+            in_dim=in_dim,
+            hidden_dim=hidden_dim,
+            num_layers=num_layers,
+            num_classes=num_classes,
+            dropout=dropout,
+        )
         self.model.load_state_dict(ckpt["state_dict"])
         self.model.to(device)
         self.model.eval()
         self.device = device
+        mean = ckpt.get("mean")
+        std = ckpt.get("std")
+        if mean is not None and std is not None:
+            self.mean = torch.from_numpy(mean).to(device)
+            self.std = torch.from_numpy(std).to(device)
+        else:
+            self.mean = None
+            self.std = None
 
     def infer(self, z: np.ndarray, memory_hits: list[dict]) -> LLMOutput:
         """
@@ -88,6 +116,8 @@ class LocalDecoderLLM:
             aligned with `self.class_names`.
         """
         x = torch.from_numpy(z.astype("float32")).to(self.device).unsqueeze(0)
+        if self.mean is not None and self.std is not None:
+            x = (x - self.mean) / self.std
         with torch.no_grad():
             logits = self.model(x)                          # shape (1, num_classes)
             probs = torch.softmax(logits, dim=-1)[0].cpu().numpy()  # (num_classes,)

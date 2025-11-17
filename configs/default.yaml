@@ -1,4 +1,4 @@
-trials: 3000
+trials: 400
 seed: 42
 snr_levels: ["low", "med", "high"]
 
@@ -20,12 +20,12 @@ llm_api_key: EMPTY
 # configs/default.yaml  (only the TVB bits shown)
 
 tvb:
-  regions: 68        # small subset keeps it snappy
+  regions: 136       # doubled resolution for richer embeddings
   dt_ms: 1.0
   coupling: 0.30     # if no ignition, try 0.25–0.35
   noise: 0.05        # small stochasticity
-  workspace_nodes: [10, 11, 12, 18, 19, 25]
-  language_nodes: [30, 31, 32, 33, 34]
+  workspace_nodes: [10, 11, 12, 18, 19, 25, 78, 79, 80, 86, 87, 93]
+  language_nodes: [30, 31, 32, 33, 34, 98, 99, 100, 101, 102]
 
 
 decision:

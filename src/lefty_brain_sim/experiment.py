@@ -144,6 +144,7 @@ class Experiment:
         conf = None
         llm_queried = False
         activity_snapshot = None
+        decoder_snapshot = None
         all_nodes = np.arange(self.tvb.cfg.regions)
 
         # --- debug bookkeeping ---
@@ -197,11 +198,14 @@ class Experiment:
                 poll = ignited and gate_open and not llm_queried
 
             if poll:
-                # --- LOCAL DECODER BRANCH (5-way classifier) ---
+                all_nodes = np.arange(self.tvb.cfg.regions)
+                decoder_vec = self.tvb.readout(all_nodes)
+                if decoder_snapshot is None:
+                    decoder_snapshot = decoder_vec.tolist()
+
+                # --- LOCAL DECODER BRANCH (next-token predictor) ---
                 if isinstance(self.llm, LocalDecoderLLM):
-                    # same kind of vector we trained on: full-brain readout
-                    all_nodes = np.arange(self.tvb.cfg.regions)
-                    z = self.tvb.readout(all_nodes)
+                    z = decoder_vec
                     hits = []  # not using hippocampal memory here
 
                     out = self.llm.infer(z, hits)
@@ -293,6 +297,7 @@ class Experiment:
             stimulus_id=stimulus_id,
             stimulus_token=stim_token,
             activity_snapshot=activity_snapshot,
+            decoder_snapshot=decoder_snapshot,
             generated_tokens=generated_tokens,
             generated_token_ids=generated_token_ids,
             target_token_id=target_token_id,

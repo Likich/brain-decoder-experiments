@@ -61,7 +61,7 @@ def main():
     expected_len = None
 
     for r in rows:
-        snap = r.get("activity_snapshot")
+        snap = r.get("decoder_snapshot") or r.get("activity_snapshot")
         if snap is None:
             continue
 
