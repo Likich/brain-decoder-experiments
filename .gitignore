@@ -1,0 +1,33 @@
+cat > .gitignore << 'EOF'
+# --- Python junk ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# --- Virtual env ---
+.venv/
+venv/
+env/
+
+# --- OS junk ---
+.DS_Store
+
+# --- Editor junk ---
+.vscode/
+.idea/
+*.swp
+
+# --- Outputs / artifacts ---
+outputs/
+models/
+
+# --- Logs / temp ---
+*.log
+*.tmp
+*.bak
+
+# --- Jupyter ---
+.ipynb_checkpoints/
+EOF

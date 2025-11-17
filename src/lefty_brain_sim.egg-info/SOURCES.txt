@@ -1,0 +1,16 @@
+README.md
+pyproject.toml
+src/lefty_brain_sim/__init__.py
+src/lefty_brain_sim/decision.py
+src/lefty_brain_sim/encdec.py
+src/lefty_brain_sim/experiment.py
+src/lefty_brain_sim/gating.py
+src/lefty_brain_sim/llm_iface.py
+src/lefty_brain_sim/memory.py
+src/lefty_brain_sim/tvb_iface.py
+src/lefty_brain_sim/utils.py
+src/lefty_brain_sim.egg-info/PKG-INFO
+src/lefty_brain_sim.egg-info/SOURCES.txt
+src/lefty_brain_sim.egg-info/dependency_links.txt
+src/lefty_brain_sim.egg-info/requires.txt
+src/lefty_brain_sim.egg-info/top_level.txt

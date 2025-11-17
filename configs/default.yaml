@@ -1,0 +1,42 @@
+seed: 42
+snr_levels: ["low", "med", "high"]
+
+
+ignition_threshold: 0.45   
+ignition_min_ms: 30
+
+
+llm_policy: "gated"          # or "always" if you want continuous reading
+llm_provider: "local_decoder"
+local_decoder_ckpt: "models/brain_decoder.pt"
+speed_accuracy: "fast"  # fast | balanced | cautious
+llm_model: mistralai/Mixtral-8x7B-Instruct-v0.1
+llm_max_tokens: 64
+llm_temperature: 0.2
+llm_base_url: http://10.180.132.23:8188/v1
+llm_api_key: EMPTY
+
+# configs/default.yaml  (only the TVB bits shown)
+trials: 100
+tvb:
+  regions: 68        # small subset keeps it snappy
+  dt_ms: 1.0
+  coupling: 0.30     # if no ignition, try 0.25–0.35
+  noise: 0.05        # small stochasticity
+  workspace_nodes: [10, 11, 12, 18, 19, 25]
+  language_nodes: [30, 31, 32, 33, 34]
+
+
+decision:
+  tau_ms: 30               # integrate a bit faster
+  gamma: 1.2               # internal scaling (if your DecisionNode uses it)
+  noise: 0.20              # a touch of jitter helps crossings
+  bound: 0.25              # easier to hit than 1.0
+
+gate:
+  cool_down_ms: 30
+
+memory:
+  dim: 32
+  k: 5
+

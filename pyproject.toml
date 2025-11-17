@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+
+[project]
+name = "lefty_brain_sim"
+version = "0.1.0"
+description = "Left-hemisphere ignition, choice, and report simulation (TVB + RL + LLM)"
+authors = [{name = "Angelina et al."}]
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+"numpy>=1.24",
+"scipy>=1.10",
+"pandas>=2.0",
+"pydantic>=2.0",
+"pyyaml>=6.0",
+"torch>=2.2",
+"faiss-cpu>=1.7.4",
+"tqdm>=4.66",
+# Optional / external:
+# "tvb-library>=2.7.0",
+]
+
+
+[tool.setuptools]
+packages = {find = {where = ["src"]}}
