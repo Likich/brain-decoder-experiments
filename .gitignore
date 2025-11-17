@@ -22,6 +22,8 @@ env/
 # --- Outputs / artifacts ---
 outputs/
 models/
+runs/
+data/
 
 # --- Logs / temp ---
 *.log
