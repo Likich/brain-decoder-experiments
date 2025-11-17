@@ -1,8 +1,4 @@
-<<<<<<< HEAD
 trials: 400
-=======
-trials: 3000
->>>>>>> a7cd2f3 (Trying autoregressive)
 seed: 42
 snr_levels: ["low", "med", "high"]
 

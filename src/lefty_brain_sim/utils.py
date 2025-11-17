@@ -24,10 +24,7 @@ class TrialResult:
     stimulus_id: int | None = None
     stimulus_token: str | None = None
     target_token_id: int | None = None
-<<<<<<< HEAD
     decoder_snapshot: Optional[List[float]] = None
-=======
->>>>>>> a7cd2f3 (Trying autoregressive)
     activity_snapshot: Optional[List[float]] = None
     generated_tokens: Optional[List[str]] = None
     generated_token_ids: Optional[List[int]] = None
