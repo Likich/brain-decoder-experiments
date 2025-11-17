@@ -13,6 +13,8 @@ with open(path) as f:
 
 print("N trials:", len(trials))
 
+
+
 # Map label → index, if your model uses fixed order
 classes = ["APPLE", "BANANA", "GRAPE", "ORANGE", "PEAR"]
 label2idx = {c: i for i, c in enumerate(classes)}
@@ -45,3 +47,4 @@ for snr, ts in by_snr.items():
         f"SNR={snr:4} | trials={n:3} | ignited={n_ignited:3} | "
         f"decisions={total_decisions:3} | acc={acc:0.3f}"
     )
+

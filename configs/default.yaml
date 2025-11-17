@@ -1,3 +1,4 @@
+trials: 10
 seed: 42
 snr_levels: ["low", "med", "high"]
 
@@ -17,7 +18,7 @@ llm_base_url: http://10.180.132.23:8188/v1
 llm_api_key: EMPTY
 
 # configs/default.yaml  (only the TVB bits shown)
-trials: 100
+
 tvb:
   regions: 68        # small subset keeps it snappy
   dt_ms: 1.0

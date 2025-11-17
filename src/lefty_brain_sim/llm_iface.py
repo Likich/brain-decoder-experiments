@@ -14,37 +14,24 @@ import torch
 from torch import nn
 from dataclasses import dataclass
 
+import json
+from dataclasses import dataclass
+from pathlib import Path
+
+import numpy as np
+import torch
+import torch.nn as nn
+
 
 @dataclass
-class LLMOut:
-    evidence: dict
+class LLMOutput:
+    # evidence is a vector of class probabilities, one per fruit
+    evidence: np.ndarray  # shape = (num_classes,)
     report: str
-
-class MockLLM:
-    """
-    Placeholder LLM evidence provider. Given a feature vector z and optional
-    memory hits, emits a soft evidence distribution and a short report.
-    Replace with an actual LLM call (RAG) as needed.
-    """
-    def __init__(self, vocab=("APPLE", "PEAR")):
-        self.vocab = vocab
-
-    def infer(self, z: np.ndarray, memory_hits: list[dict]) -> LLMOut:
-        # Toy rule: mean(z) > 0 → A; else B; modulated by memory
-        bias = float(np.tanh(z.mean()))
-        mem_bias = 0.1 * sum([m.get("bias", 0.0) for m in memory_hits])
-        a = 0.5 + 0.4 * (bias + mem_bias)
-        a = float(np.clip(a, 0.01, 0.99))
-        b = 1.0 - a
-        token = self.vocab[0] if a > b else self.vocab[1]
-        report = f"I saw '{token}'. Confidence {max(a,b):.2f}"
-        return LLMOut(evidence={"A": a, "B": b}, report=report)
-    
-    
 
 
 class LocalDecoderNet(nn.Module):
-    def __init__(self, in_dim: int, hidden_dim: int = 128, num_classes: int = 2):
+    def __init__(self, in_dim: int, hidden_dim: int = 128, num_classes: int = 5):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(in_dim, hidden_dim),
@@ -52,7 +39,7 @@ class LocalDecoderNet(nn.Module):
             nn.LayerNorm(hidden_dim),
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, num_classes),
+            nn.Linear(hidden_dim, num_classes),  # logits over 5 classes
         )
 
     def forward(self, x):
@@ -62,8 +49,9 @@ class LocalDecoderNet(nn.Module):
 class LocalDecoderLLM:
     """
     Tiny local 'LLM' that reads brain state vectors and
-    outputs a class label + confidence.
+    outputs a 5-way class distribution + a human-readable report.
     """
+
     def __init__(
         self,
         ckpt_path: str,
@@ -72,7 +60,16 @@ class LocalDecoderLLM:
     ):
         ckpt = torch.load(ckpt_path, map_location=device)
         in_dim = ckpt["in_dim"]
-        num_classes = ckpt.get("num_classes", 2)
+
+        # Load meta to get class names (should be 5 fruits)
+        meta = json.loads(Path(meta_path).read_text())
+        self.class_names = meta["class_names"]           # e.g. ["APPLE", "BANANA", ...]
+        num_classes = ckpt.get("num_classes", len(self.class_names))
+
+        assert num_classes == len(self.class_names), (
+            f"num_classes={num_classes} in checkpoint, "
+            f"but got {len(self.class_names)} class_names in meta."
+        )
 
         self.model = LocalDecoderNet(in_dim=in_dim, num_classes=num_classes)
         self.model.load_state_dict(ckpt["state_dict"])
@@ -80,28 +77,30 @@ class LocalDecoderLLM:
         self.model.eval()
         self.device = device
 
-        meta = json.loads(Path(meta_path).read_text())
-        self.class_names = meta["class_names"]
-
     def infer(self, z: np.ndarray, memory_hits: list[dict]) -> LLMOutput:
         """
-        z: brain state vector (encoder output or workspace readout)
-        memory_hits: unused for now, but kept for API compatibility
+        z: brain state vector (workspace / full-brain readout), shape (D,)
+        memory_hits: unused here, kept for API compatibility.
+
+        Returns:
+            LLMOutput where `evidence` is a length-5 probability vector
+            aligned with `self.class_names`.
         """
         x = torch.from_numpy(z.astype("float32")).to(self.device).unsqueeze(0)
         with torch.no_grad():
-            logits = self.model(x)
-            probs = torch.softmax(logits, dim=-1)[0].cpu().numpy()
+            logits = self.model(x)                          # shape (1, num_classes)
+            probs = torch.softmax(logits, dim=-1)[0].cpu().numpy()  # (num_classes,)
 
-        idx = int(probs.argmax())
+        idx = int(np.argmax(probs))
         label = self.class_names[idx]
         p = float(probs[idx])
 
-        # map [0, 1] → [-1, 1] as “evidence” scalar
-        evidence = 2.0 * (p - 0.5)
-
         report = f"I saw '{label}' (p={p:.2f})"
-        return LLMOut(evidence=evidence, report=report)
+
+        # IMPORTANT: evidence is the full probability vector,
+        # NOT a scalar. The decision module will decide how to use it.
+        return LLMOutput(evidence=probs, report=report)
+
 
 
 class OpenAICompatLLM:
@@ -114,7 +113,7 @@ class OpenAICompatLLM:
 
 
 
-    def infer(self, z: np.ndarray, hits: list[dict]) -> LLMOut:
+    def infer(self, z: np.ndarray, hits: list[dict]) -> LLMOutput:
         mean_z = float(np.mean(z))
 
         prompt = f"""
@@ -167,3 +166,22 @@ Return ONLY valid JSON of the form:
         report = f"I saw '{label}' (p={p:.2f})"
         return LLMOut(evidence=evidence, report=report)
 
+class MockLLM:
+    """
+    Placeholder LLM evidence provider. Given a feature vector z and optional
+    memory hits, emits a soft evidence distribution and a short report.
+    Replace with an actual LLM call (RAG) as needed.
+    """
+    def __init__(self, vocab=("APPLE", "PEAR")):
+        self.vocab = vocab
+
+    def infer(self, z: np.ndarray, memory_hits: list[dict]) -> LLMOut:
+        # Toy rule: mean(z) > 0 → A; else B; modulated by memory
+        bias = float(np.tanh(z.mean()))
+        mem_bias = 0.1 * sum([m.get("bias", 0.0) for m in memory_hits])
+        a = 0.5 + 0.4 * (bias + mem_bias)
+        a = float(np.clip(a, 0.01, 0.99))
+        b = 1.0 - a
+        token = self.vocab[0] if a > b else self.vocab[1]
+        report = f"I saw '{token}'. Confidence {max(a,b):.2f}"
+        return LLMOutput(evidence={"A": a, "B": b}, report=report)

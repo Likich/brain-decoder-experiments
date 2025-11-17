@@ -2,6 +2,7 @@ from __future__ import annotations
 import yaml
 import numpy as np
 from dataclasses import dataclass
+import sys, json
 from .utils import set_seed, TrialResult
 from .tvb_iface import TVBEngine, TVBConfig
 from .gating import GateConfig, IgnitionDetector, ThalamicGate
@@ -90,7 +91,9 @@ class Experiment:
 
         # --- Stimulus vocabulary (5 classes) ---
         # You can change these words if you like.
-        self.class_names = ["APPLE", "PEAR", "ORANGE", "BANANA", "GRAPE"]
+        # --- Stimulus vocabulary (5 classes) ---
+        self.class_names = ["APPLE", "BANANA", "GRAPE", "ORANGE", "PEAR"]
+
 
         # Each class gets a different +/-1 pattern over language nodes
         rng = np.random.RandomState(self.cfg.seed)
@@ -123,6 +126,13 @@ class Experiment:
         activity_snapshot = None
         all_nodes = np.arange(self.tvb.cfg.regions)
 
+        # --- debug bookkeeping ---
+        llm_choice_idx = None
+        llm_choice_label = None
+        ev_at_decision = None
+
+        policy = str(self.cfg.llm_policy).lower()
+
         while t < total_ms:
             # 1) build external input for this tick
             ext = np.zeros((self.tvb.cfg.regions,))
@@ -142,7 +152,7 @@ class Experiment:
             ignited, _ = self.detector.update(state)
             if ignited and ign_latency is None:
                 ign_latency = t
-                # if you prefer full-brain snapshot at ignition:
+                # full-brain snapshot at ignition
                 all_nodes = np.arange(self.tvb.cfg.regions)
                 full_act = self.tvb.readout(all_nodes)
                 activity_snapshot = full_act.tolist()
@@ -150,57 +160,103 @@ class Experiment:
             # 5) evidence from LLM (possibly none)
             ev_scalar = 0.0  # default every tick
 
-            poll = False
-            if self.cfg.llm_policy == "always":
-                poll = True
-            elif self.cfg.llm_policy == "gated":
-                poll = self.gate.step(self.dt_ms, ignited)
-            elif self.cfg.llm_policy == "none":
+            # gate dynamics (for "gated" policy)
+            gate_open = False
+            if policy == "gated":
+                gate_open = self.gate.step(self.dt_ms, ignited)
+
+            if policy not in ("always", "gated", "none"):
+                raise ValueError(f"Unknown llm_policy: {self.cfg.llm_policy!r}")
+
+            # Decide whether to poll the LLM on this tick
+            if policy == "none":
                 poll = False
+            elif policy == "always":
+                poll = ignited and not llm_queried
+            else:  # "gated"
+                poll = ignited and gate_open and not llm_queried
 
-            if self.cfg.llm_policy != "none":
-                poll = (self.cfg.llm_policy == "always") or (
-                    self.cfg.llm_policy == "gated" and self.gate.step(self.dt_ms, ignited)
-                )
+            if poll:
+                # --- LOCAL DECODER BRANCH (5-way classifier) ---
+                if isinstance(self.llm, LocalDecoderLLM):
+                    # same kind of vector we trained on: full-brain readout
+                    all_nodes = np.arange(self.tvb.cfg.regions)
+                    z = self.tvb.readout(all_nodes)
+                    hits = []  # not using hippocampal memory here
 
-                if poll and ignited and not llm_queried:
-                    # --- choose what to feed based on LLM type ---
-                    if isinstance(self.llm, LocalDecoderLLM):
-                        # use the same kind of vector you trained on: full brain readout
-                        all_nodes = np.arange(self.tvb.cfg.regions)
-                        z = self.tvb.readout(all_nodes)
-                        hits = []  # not using hippocampal memory here
-                    else:
-                        # original path: encoded language workspace + memory
-                        z = self.encoder(self.tvb.readout(self.lang_nodes))
-                        hits = self.mem.search(z, k=self.cfg.memory.get("k", 5))
+                    out = self.llm.infer(z, hits)
+                    probs = np.asarray(out.evidence, dtype=float)
+
+                    llm_choice_idx = int(np.argmax(probs))
+                    llm_choice_label = self.class_names[llm_choice_idx]
+                    reported = out.report
+                    llm_queried = True
+
+                    # For local decoder we treat this as the actual 5-way choice.
+                    choice = llm_choice_idx
+                    rt = t
+                    conf = float(probs[llm_choice_idx])
+                    ev_at_decision = conf
+
+                    # end trial once the local decoder has spoken
+                    break
+
+                # --- ORIGINAL REMOTE-LLM BRANCH ---
+                else:
+                    # encoded language workspace + hippocampal memory
+                    z = self.encoder(self.tvb.readout(self.lang_nodes))
+                    hits = self.mem.search(z, k=self.cfg.memory.get("k", 5))
 
                     out = self.llm.infer(z, hits)
                     ev_scalar = self.decoder(out.evidence)
                     reported = out.report
 
-                    # only store in memory for non-local decoders
-                    if not isinstance(self.llm, LocalDecoderLLM):
-                        self.mem.add(z, {"bias": ev_scalar})
+                    # store in memory only for non-local decoders
+                    self.mem.add(z, {"bias": ev_scalar})
 
                     llm_queried = True
 
-
             # 6) decision dynamics ALWAYS advance in time
-            gain = {"fast": 1.2, "balanced": 1.0, "cautious": 0.8}[self.cfg.speed_accuracy]
-            done, ch, t_dec, c = self.decision.step(self.dt_ms, gain * ev_scalar)
-            if done and choice is None:
-                choice, rt, conf = ch, t_dec, c
-                break
+            # (this is only meaningful for the non-local-LLM branch now)
+            if not isinstance(self.llm, LocalDecoderLLM):
+                gain = {
+                    "fast": 1.2,
+                    "balanced": 1.0,
+                    "cautious": 0.8
+                }[self.cfg.speed_accuracy]
 
-            # 7) advance simulated time (CRUCIAL)
+                done, ch, t_dec, c = self.decision.step(
+                    self.dt_ms, gain * ev_scalar
+                )
+                if done and choice is None:
+                    choice, rt, conf = ch, t_dec, c
+                    ev_at_decision = ev_scalar
+                    break
+
+            # 7) advance simulated time
             t += self.dt_ms
+
+        debug_row = {
+            "snr": snr,
+            "stimulus": stim_label,
+            "ignited": bool(self.detector.ignited),
+            "ignition_latency_ms": ign_latency,
+            "llm_queried": llm_queried,
+            "llm_choice_idx": llm_choice_idx,
+            "llm_choice_label": llm_choice_label,
+            "report": reported,
+            "decision_choice": choice,
+            "decision_rt_ms": rt,
+            "decision_conf": conf,
+            "ev_at_decision": ev_at_decision,
+        }
+        print("DEBUG_TRIAL", json.dumps(debug_row), file=sys.stderr)
 
         return TrialResult(
             snr=snr,
             ignited=bool(self.detector.ignited),
             ignition_latency_ms=ign_latency,
-            choice=choice,
+            choice=choice,           # 0–4 when LocalDecoderLLM is used
             rt_ms=rt,
             confidence=conf,
             report=reported,
