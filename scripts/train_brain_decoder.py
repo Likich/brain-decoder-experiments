@@ -1,15 +1,11 @@
-# scripts/train_brain_decoder.py
+import argparse
 import json
 from pathlib import Path
 
 import numpy as np
 import torch
 from torch import nn
-from torch.utils.data import TensorDataset, DataLoader, random_split
-
-DATA_PATH = Path("data/brain_multiclass.npz")
-OUT_DIR = Path("models")
-OUT_DIR.mkdir(exist_ok=True)
+from torch.utils.data import DataLoader, TensorDataset, random_split
 
 
 class BrainDecoder(nn.Module):
@@ -29,24 +25,25 @@ class BrainDecoder(nn.Module):
 
 
 def main():
-    if not DATA_PATH.exists():
-        raise SystemExit(f"Data file not found: {DATA_PATH}")
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--data", type=Path, default=Path("data/brain_multiclass.npz"))
+    ap.add_argument("--out_dir", type=Path, default=Path("models"))
+    ap.add_argument("--epochs", type=int, default=20)
+    ap.add_argument("--tokenizer", type=str, default=None, help="Optional tokenizer path for metadata")
+    args = ap.parse_args()
 
-    data = np.load(DATA_PATH, allow_pickle=True)
+    if not args.data.exists():
+        raise SystemExit(f"Data file not found: {args.data}")
+
+    data = np.load(args.data, allow_pickle=True)
     X = data["X"]
     y = data["y"]
     label_names = data["label_names"].tolist()
     num_classes = int(data["num_classes"])
 
     print("Loaded data:", X.shape, y.shape, "num_classes:", num_classes)
-    print("Classes:", label_names)
 
-    X_t = torch.from_numpy(X)
-    y_t = torch.from_numpy(y)
-
-    dataset = TensorDataset(X_t, y_t)
-
-    # simple 80/20 split
+    dataset = TensorDataset(torch.from_numpy(X), torch.from_numpy(y))
     n = len(dataset)
     n_train = int(0.8 * n)
     n_val = n - n_train
@@ -74,13 +71,11 @@ def main():
                 total += yb.numel()
         return correct / total if total else 0.0
 
-    epochs = 20
-    for ep in range(1, epochs + 1):
+    for ep in range(1, args.epochs + 1):
         model.train()
         for xb, yb in train_loader:
             xb, yb = xb.to(device), yb.to(device)
-            logits = model(xb)
-            loss = crit(logits, yb)
+            loss = crit(model(xb), yb)
             optim.zero_grad()
             loss.backward()
             optim.step()
@@ -89,7 +84,8 @@ def main():
         acc_val = eval_loader(val_loader)
         print(f"Epoch {ep:02d} | train acc={acc_train:.3f} | val acc={acc_val:.3f}")
 
-    ckpt_path = OUT_DIR / "brain_decoder.pt"
+    args.out_dir.mkdir(parents=True, exist_ok=True)
+    ckpt_path = args.out_dir / "brain_decoder.pt"
     torch.save(
         {
             "state_dict": model.state_dict(),
@@ -103,8 +99,11 @@ def main():
     meta = {
         "class_names": label_names,
     }
-    (OUT_DIR / "brain_decoder_meta.json").write_text(json.dumps(meta))
-    print("Saved metadata to", OUT_DIR / "brain_decoder_meta.json")
+    if args.tokenizer:
+        meta["tokenizer"] = args.tokenizer
+    meta_path = args.out_dir / "brain_decoder_meta.json"
+    meta_path.write_text(json.dumps(meta))
+    print("Saved metadata to", meta_path)
 
 
 if __name__ == "__main__":

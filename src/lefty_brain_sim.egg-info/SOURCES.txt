@@ -7,6 +7,7 @@ src/lefty_brain_sim/experiment.py
 src/lefty_brain_sim/gating.py
 src/lefty_brain_sim/llm_iface.py
 src/lefty_brain_sim/memory.py
+src/lefty_brain_sim/stimuli.py
 src/lefty_brain_sim/tvb_iface.py
 src/lefty_brain_sim/utils.py
 src/lefty_brain_sim.egg-info/PKG-INFO

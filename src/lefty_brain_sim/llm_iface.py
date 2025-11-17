@@ -64,6 +64,7 @@ class LocalDecoderLLM:
         # Load meta to get class names (should be 5 fruits)
         meta = json.loads(Path(meta_path).read_text())
         self.class_names = meta["class_names"]           # e.g. ["APPLE", "BANANA", ...]
+        self.tokenizer_path = meta.get("tokenizer")
         num_classes = ckpt.get("num_classes", len(self.class_names))
 
         assert num_classes == len(self.class_names), (

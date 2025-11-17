@@ -21,7 +21,12 @@ class TrialResult:
     confidence: float | None
     report: str | None
     stimulus: str | None = None
+    stimulus_id: int | None = None
+    stimulus_token: str | None = None
+    target_token_id: int | None = None
     activity_snapshot: Optional[List[float]] = None
+    generated_tokens: Optional[List[str]] = None
+    generated_token_ids: Optional[List[int]] = None
 
     def to_json(self) -> str:
         """

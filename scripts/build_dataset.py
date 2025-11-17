@@ -1,17 +1,15 @@
-# scripts/build_dataset.py
+import argparse
 import json
-import sys
 from pathlib import Path
 
 import numpy as np
+from tokenizers import Tokenizer
 
 
-def main():
-    path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("runs/results.json")
-    if not path.exists():
-        print(f"File not found: {path}")
-        return
+CANONICAL_CLASSES = ["APPLE", "BANANA", "GRAPE", "ORANGE", "PEAR"]
 
+
+def load_rows(path: Path) -> list[dict]:
     rows = []
     with path.open() as f:
         for line in f:
@@ -21,67 +19,90 @@ def main():
             try:
                 rows.append(json.loads(line))
             except json.JSONDecodeError:
-                # ignore stray debug / log lines
                 continue
+    return rows
 
+
+def vocab_from_tokenizer(tok_path: Path) -> list[str]:
+    tok = Tokenizer.from_file(str(tok_path))
+    vocab = tok.get_vocab()
+    if not vocab:
+        raise ValueError(f"Tokenizer {tok_path} has empty vocab")
+    max_id = max(vocab.values())
+    inv = ["<unk>"] * (max_id + 1)
+    for token, idx in vocab.items():
+        inv[idx] = token
+    return inv
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--input", type=Path, default=Path("outputs/experiment.jsonl"))
+    ap.add_argument("--out", type=Path, default=Path("data/brain_multiclass.npz"))
+    ap.add_argument("--tokenizer", type=Path, default=None, help="Optional tokenizer.json to derive vocab order")
+    ap.add_argument("--use-target", action="store_true", help="Use target_token_id labels (next-token training)")
+    args = ap.parse_args()
+
+    if not args.input.exists():
+        raise SystemExit(f"File not found: {args.input}")
+
+    rows = load_rows(args.input)
     if not rows:
-        print("No JSON rows parsed. Check results.json.")
-        return
+        raise SystemExit("No JSON rows parsed. Check results file.")
 
-    # --- Discover labels that appear with snapshots ---
-    labels = sorted(
-        {r["stimulus"] for r in rows if r.get("activity_snapshot") is not None}
-    )
-    if not labels:
-        print("No labels with activity_snapshot found.")
-        return
+    if args.tokenizer:
+        class_names = vocab_from_tokenizer(args.tokenizer)
+    else:
+        class_names = CANONICAL_CLASSES
 
-    print("Discovered labels:", labels)
-    label_map = {lab: i for i, lab in enumerate(labels)}
+    label_map = {lab: i for i, lab in enumerate(class_names)}
 
-    # --- Build X, y ---
-    X = []
-    y = []
-
-    # Infer expected length from the *first* valid snapshot
+    X, y = [], []
     expected_len = None
 
     for r in rows:
         snap = r.get("activity_snapshot")
-        stim = r.get("stimulus")
+        if snap is None:
+            continue
 
-        if snap is None or stim not in label_map:
+        if args.use_target and r.get("target_token_id") is not None:
+            idx = int(r["target_token_id"])
+        else:
+            stim_id = r.get("stimulus_id")
+            if stim_id is not None:
+                idx = int(stim_id)
+            else:
+                lab = r.get("stimulus_token") or r.get("stimulus")
+                if lab not in label_map:
+                    continue
+                idx = label_map[lab]
+
+        if idx >= len(class_names):
             continue
 
         if expected_len is None:
             expected_len = len(snap)
-
-        # Skip any weird rows with different length (old runs)
         if len(snap) != expected_len:
             continue
 
         X.append(snap)
-        y.append(label_map[stim])
+        y.append(idx)
 
     if not X:
-        print("No usable snapshots found (maybe all had inconsistent lengths?).")
-        return
+        raise SystemExit("No usable snapshots found (maybe inconsistent lengths?).")
 
-    X = np.array(X, dtype=np.float32)
-    y = np.array(y, dtype=np.int64)
+    X = np.asarray(X, dtype=np.float32)
+    y = np.asarray(y, dtype=np.int64)
 
-    print("Dataset shape:", X.shape, y.shape)
-
-    out_dir = Path("data")
-    out_dir.mkdir(exist_ok=True)
+    args.out.parent.mkdir(parents=True, exist_ok=True)
     np.savez(
-        out_dir / "brain_multiclass.npz",
+        args.out,
         X=X,
         y=y,
-        label_names=np.array(labels),
-        num_classes=len(labels),
+        label_names=np.array(class_names),
+        num_classes=len(class_names),
     )
-    print("Saved to data/brain_multiclass.npz")
+    print(f"Saved dataset {X.shape} → {args.out}")
 
 
 if __name__ == "__main__":

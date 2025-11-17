@@ -1,4 +1,4 @@
-trials: 10
+trials: 3000
 seed: 42
 snr_levels: ["low", "med", "high"]
 
@@ -41,3 +41,12 @@ memory:
   dim: 32
   k: 5
 
+generation:
+  enabled: true
+  max_tokens: 4
+
+stimuli:
+  mode: "tokens"                 # "fruits" for legacy 5-class setup
+  tokenizer: models/wiki_tokenizer.json
+  schedule: data/wiki40b_tokens.jsonl
+  predict_next: true

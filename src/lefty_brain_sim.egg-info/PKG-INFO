@@ -13,9 +13,10 @@ Requires-Dist: pyyaml>=6.0
 Requires-Dist: torch>=2.2
 Requires-Dist: faiss-cpu>=1.7.4
 Requires-Dist: tqdm>=4.66
+Requires-Dist: datasets>=2.18
+Requires-Dist: tokenizers>=0.15
 
-"""
-# lefty_brain_sim
+# Brain Simulator
 
 
 A minimal, research-ready scaffold for simulating left-hemisphere ignition,
@@ -54,4 +55,31 @@ python scripts/run_experiment.py --config configs/default.yaml
 - Replace the mock TVB engine with `tvb-library` coupling + monitors.
 - Replace `MockLLM` with your preferred LLM backend or an API wrapper.
 - All components are pure Python and unit-testable.
-"""
+
+### Corpus helper
+Run `python scripts/download_wiki40b.py --lang en --split train[:0.05%] --max_articles 500`
+to grab a small Wiki40B shard locally (requires the Hugging Face `datasets` package).
+The resulting JSONL in `data/` can seed your token-level stimulus pipeline.
+
+### Tokenizer + tokens
+1. `python scripts/train_tokenizer.py --input data/wiki40b_en.jsonl --vocab_size 2048`
+   writes `models/wiki_tokenizer.json`.
+2. `python scripts/encode_corpus_tokens.py --tokenizer models/wiki_tokenizer.json`
+   emits token-id sequences to `data/wiki40b_tokens.jsonl`, ready for ingestion.
+
+### Token stimulus pipeline
+1. Download corpus + train tokenizer (see above).
+2. Ensure `configs/default.yaml` has `stimuli.mode: "tokens"` plus the tokenizer
+   and `data/wiki40b_tokens.jsonl` schedule paths.
+3. Run the simulator: `python scripts/run_experiment.py --config configs/default.yaml`
+   to fill `outputs/experiment.jsonl`.
+4. Build a training set: `python scripts/build_dataset.py --input outputs/experiment.jsonl --tokenizer models/wiki_tokenizer.json --out data/brain_tokens.npz`.
+5. Train the local decoder: `python scripts/train_brain_decoder.py --data data/brain_tokens.npz --tokenizer models/wiki_tokenizer.json`.
+6. Repeat steps 3–5 as you collect new cortex activity (the decoder consumes the metadata written in step 5).
+
+## Generative loop
+Set `generation.enabled: true` (default) to have each trial roll into an
+autoregressive loop. Once the cortex/decoder produces a categorical decision,
+that token is fed back as the next stimulus and the loop continues until
+`generation.max_tokens` are emitted. Generated sequences are stored on each
+trial line under `generated_tokens`.

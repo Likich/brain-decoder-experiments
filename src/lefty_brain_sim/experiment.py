@@ -9,14 +9,11 @@ from .gating import GateConfig, IgnitionDetector, ThalamicGate
 from .decision import DecisionConfig, DecisionNode
 from .encdec import StateEncoder, EvidenceDecoder
 from .memory import HippocampalMemory
-from .llm_iface import MockLLM
+from .stimuli import TokenSchedule
+from .llm_iface import MockLLM, LocalDecoderLLM
+from tokenizers import Tokenizer
 try:
     from .llm_iface import OpenAICompatLLM  # optional backend for vLLM/OpenAI-compatible servers
-except Exception:
-    OpenAICompatLLM = None
-from .llm_iface import MockLLM, LocalDecoderLLM
-try:
-    from .llm_iface import OpenAICompatLLM  # optional backend
 except Exception:
     OpenAICompatLLM = None
     
@@ -36,6 +33,8 @@ class ExpConfig:
     decision: dict
     gate: dict
     memory: dict
+    generation: dict | None = None
+    stimuli: dict | None = None
     llm_provider: str | None = None
     llm_model: str | None = None
     llm_max_tokens: int | None = None
@@ -66,6 +65,9 @@ class Experiment:
         self.encoder = StateEncoder(in_dim=len(tvbc.language_nodes))
         self.decoder = EvidenceDecoder()
         self.mem = HippocampalMemory(dim=cfg.memory.get("dim", 32))
+        self.gen_cfg = cfg.generation or {}
+        self.gen_enabled = bool(self.gen_cfg.get("enabled", False))
+        self.gen_max_tokens = max(1, int(self.gen_cfg.get("max_tokens", 1)))
 
         provider = getattr(cfg, "llm_provider", "mock")
 
@@ -89,27 +91,45 @@ class Experiment:
         self.workspace_nodes = tvbc.workspace_nodes
         self.dt_ms = tvbc.dt_ms
 
-        # --- Stimulus vocabulary (5 classes) ---
-        # You can change these words if you like.
-        # --- Stimulus vocabulary (5 classes) ---
-        self.class_names = ["APPLE", "BANANA", "GRAPE", "ORANGE", "PEAR"]
+        # --- Stimulus configuration ---
+        self.stimuli_cfg = cfg.stimuli or {}
+        self.stimulus_mode = self.stimuli_cfg.get("mode", "fruits").lower()
+        self.tokenizer = None
+        self.token_schedule = None
+        self.predict_next = bool(self.stimuli_cfg.get("predict_next", False))
+        self.class_names, self.stim_patterns = self._init_stimuli()
 
 
-        # Each class gets a different +/-1 pattern over language nodes
-        rng = np.random.RandomState(self.cfg.seed)
-        self.stim_patterns = rng.choice(
-            [-1.0, 1.0],
-            size=(len(self.class_names), len(self.lang_nodes)),
-        )
-
-    def run_trial(self, snr: str) -> TrialResult:
+    def run_trial(
+        self,
+        snr: str,
+        stim_idx: int | None = None,
+        allow_generation: bool = True,
+        log_debug: bool = True,
+    ) -> TrialResult:
         self.tvb.reset()
         self.decision.reset()
         self.detector.ignited = False
 
-        # --- pick one of 5 stimuli ---
-        stim_idx = np.random.randint(len(self.class_names))
+        target_token_id = None
+        # --- pick a stimulus ---
+        if self.stimulus_mode == "tokens":
+            if stim_idx is None:
+                if self.token_schedule is None:
+                    raise ValueError("Token stimulus mode requires a loaded schedule")
+                stim_idx = self.token_schedule.next_token()
+                if self.predict_next:
+                    target_token_id = self.token_schedule.peek()
+        else:
+            if stim_idx is None:
+                stim_idx = np.random.randint(len(self.class_names))
+
+        if stim_idx is None or stim_idx < 0 or stim_idx >= len(self.class_names):
+            raise ValueError(f"Stimulus index {stim_idx} out of range for vocab size {len(self.class_names)}")
+
         stim_label = self.class_names[stim_idx]
+        stim_token = stim_label
+        stimulus_id = int(stim_idx)
 
         # --- stimulus timing & amplitude ---
         stim_ms = 200 if snr == "high" else 120 if snr == "med" else 60
@@ -239,6 +259,7 @@ class Experiment:
         debug_row = {
             "snr": snr,
             "stimulus": stim_label,
+            "stimulus_id": stimulus_id,
             "ignited": bool(self.detector.ignited),
             "ignition_latency_ms": ign_latency,
             "llm_queried": llm_queried,
@@ -250,7 +271,15 @@ class Experiment:
             "decision_conf": conf,
             "ev_at_decision": ev_at_decision,
         }
-        print("DEBUG_TRIAL", json.dumps(debug_row), file=sys.stderr)
+        if log_debug:
+            print("DEBUG_TRIAL", json.dumps(debug_row), file=sys.stderr)
+
+        generated_tokens = None
+        generated_token_ids = None
+        if allow_generation:
+            gen_out = self._run_generative_loop(snr, choice)
+            if gen_out is not None:
+                generated_tokens, generated_token_ids = gen_out
 
         return TrialResult(
             snr=snr,
@@ -261,8 +290,69 @@ class Experiment:
             confidence=conf,
             report=reported,
             stimulus=stim_label,
+            stimulus_id=stimulus_id,
+            stimulus_token=stim_token,
             activity_snapshot=activity_snapshot,
+            generated_tokens=generated_tokens,
+            generated_token_ids=generated_token_ids,
+            target_token_id=target_token_id,
         )
+
+    def _init_stimuli(self) -> tuple[list[str], np.ndarray]:
+        if self.stimulus_mode == "tokens":
+            tok_path = self.stimuli_cfg.get("tokenizer")
+            sched_path = self.stimuli_cfg.get("schedule")
+            if not tok_path or not sched_path:
+                raise ValueError("Token stimuli require 'tokenizer' and 'schedule' paths")
+            self.tokenizer = Tokenizer.from_file(tok_path)
+            vocab = self.tokenizer.get_vocab()
+            if not vocab:
+                raise ValueError(f"Tokenizer at {tok_path} returned empty vocab")
+            max_id = max(vocab.values())
+            class_names = ["<unk>"] * (max_id + 1)
+            for token, idx in vocab.items():
+                if 0 <= idx < len(class_names):
+                    class_names[idx] = token
+            self.token_schedule = TokenSchedule(sched_path)
+        else:
+            class_names = ["APPLE", "BANANA", "GRAPE", "ORANGE", "PEAR"]
+
+        rng = np.random.RandomState(self.cfg.seed)
+        stim_patterns = rng.choice(
+            [-1.0, 1.0],
+            size=(len(class_names), len(self.lang_nodes)),
+        )
+        return class_names, stim_patterns
+
+    def _run_generative_loop(self, snr: str, seed_choice: int | None) -> tuple[list[str], list[int]] | None:
+        """
+        After the first perceptual decision, optionally continue in an
+        autoregressive mode by feeding the chosen token back as the next
+        thalamic stimulus. Each rollout reuses the standard run_trial
+        dynamics but skips nested generation and debug logging.
+        """
+        if not self.gen_enabled:
+            return None
+        if seed_choice is None or seed_choice < 0 or seed_choice >= len(self.class_names):
+            return [], []
+
+        tokens = [self.class_names[seed_choice]]
+        token_ids = [seed_choice]
+        prev_choice = seed_choice
+
+        for _ in range(1, self.gen_max_tokens):
+            follow_up = self.run_trial(
+                snr=snr,
+                stim_idx=prev_choice,
+                allow_generation=False,
+                log_debug=False,
+            )
+            if follow_up.choice is None:
+                break
+            prev_choice = follow_up.choice
+            tokens.append(self.class_names[prev_choice])
+            token_ids.append(prev_choice)
+        return tokens, token_ids
 
 
 

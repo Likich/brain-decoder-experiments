@@ -6,3 +6,5 @@ pyyaml>=6.0
 torch>=2.2
 faiss-cpu>=1.7.4
 tqdm>=4.66
+datasets>=2.18
+tokenizers>=0.15
