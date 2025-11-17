@@ -61,7 +61,11 @@ def main():
     expected_len = None
 
     for r in rows:
+<<<<<<< HEAD
         snap = r.get("decoder_snapshot") or r.get("activity_snapshot")
+=======
+        snap = r.get("activity_snapshot")
+>>>>>>> a7cd2f3 (Trying autoregressive)
         if snap is None:
             continue
 

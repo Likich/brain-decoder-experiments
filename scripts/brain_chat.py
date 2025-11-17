@@ -1,75 +1,151 @@
+#!/usr/bin/env python3
 """
-Simple REPL to feed user text through the brain simulator and read the generated response.
+Interactive brain-conditioned chat loop.
 
-Usage:
-    python scripts/brain_chat.py --config configs/default.yaml --snr med \
-        --max_response 20 --min_conf 0.0
+Usage example:
+  python3 scripts/brain_chat.py \
+    --tokenizer models/wiki_tokenizer.json \
+    --ckpt models/language_model.pt \
+    --brain_dataset data/brain_ctx_pairs_100k.npz \
+    --brain_index 0 \
+    --block_size 96 --max_new_tokens 40 --device cuda
+
+Type 'exit' or 'quit' to stop.
 """
-
-from __future__ import annotations
 
 import argparse
-
+import numpy as np
+import torch
 from tokenizers import Tokenizer
 
-from lefty_brain_sim.experiment import Experiment
+# Reuse the language model definition
+from scripts.train_language_model import LanguageModel  # noqa: E402
 
 
-def run_prompt(exp: Experiment, snr: str, token_ids: list[int], max_response: int) -> list[int]:
+def resolve_device(arg: str | None) -> torch.device:
+    if arg:
+        return torch.device(arg)
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+def load_brain_vector(path: str, index: int) -> torch.Tensor:
+    data = np.load(path, allow_pickle=True)
+    brain = torch.tensor(data["brain"], dtype=torch.float32)
+    if index < 0 or index >= brain.shape[0]:
+        raise IndexError(f"brain_index {index} out of range 0..{brain.shape[0]-1}")
+    return brain[index]
+
+
+def crop_context(tokens: list[int], block_size: int, pad_id: int) -> torch.Tensor:
+    """Pad/trim token list to fixed block_size."""
+    tokens = tokens[-block_size:]
+    if len(tokens) < block_size:
+        tokens = [pad_id] * (block_size - len(tokens)) + tokens
+    return torch.tensor(tokens, dtype=torch.long)
+
+
+def sample_next_token(
+    logits: torch.Tensor,
+    temperature: float = 1.0,
+    top_k: int = 0,
+) -> torch.Tensor:
     """
-    Feed prompt tokens one by one (generation disabled), then enable generation
-    on the final token to collect a response sequence.
+    Sample a token from logits with temperature and optional top-k.
+    logits: (batch, vocab)
+    returns: (batch, 1) token ids
     """
-    last_result = None
-    for idx, tok in enumerate(token_ids):
-        allow_gen = idx == len(token_ids) - 1
-        last_result = exp.run_trial(
-            snr=snr,
-            stim_idx=tok,
-            allow_generation=allow_gen,
-            log_debug=False,
-        )
-    if not token_ids:
-        last_result = exp.run_trial(snr=snr, allow_generation=True, log_debug=False)
+    if temperature <= 0.0:
+        # Degenerates to argmax if someone sets temperature<=0
+        next_id = torch.argmax(logits, dim=-1, keepdim=True)
+        return next_id
 
-    response_ids = []
-    if last_result and last_result.generated_token_ids:
-        response_ids = last_result.generated_token_ids[:max_response]
-    return response_ids
+    logits = logits / temperature
+
+    if top_k > 0:
+        # Keep only top_k logits, set others to -inf
+        top_vals, top_idx = torch.topk(logits, k=top_k, dim=-1)
+        mask = torch.full_like(logits, float("-inf"))
+        mask.scatter_(dim=-1, index=top_idx, src=top_vals)
+        logits = mask
+
+    probs = torch.softmax(logits, dim=-1)
+    next_id = torch.multinomial(probs, num_samples=1)  # (batch, 1)
+    return next_id
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--config", default="configs/default.yaml")
-    ap.add_argument("--snr", default="med", choices=["low", "med", "high"])
-    ap.add_argument("--max_response", type=int, default=20)
-    ap.add_argument("--min_conf", type=float, default=0.0)
+def main():
+    ap = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    ap.add_argument("--tokenizer", required=True, help="Path to tokenizer.json")
+    ap.add_argument("--ckpt", required=True, help="Path to trained language_model.pt")
+    ap.add_argument("--brain_dataset", required=True, help="NPZ with 'brain' vectors")
+    ap.add_argument("--brain_index", type=int, default=0, help="Row to use from brain matrix")
+    ap.add_argument("--block_size", type=int, default=96, help="Context length used during training")
+    ap.add_argument("--hidden_dim", type=int, default=384, help="Model hidden dim (must match checkpoint)")
+    ap.add_argument("--num_layers", type=int, default=2, help="Transformer layers (match checkpoint)")
+    ap.add_argument("--attn_heads", type=int, default=8, help="Attention heads (match checkpoint)")
+    ap.add_argument("--dropout", type=float, default=0.11, help="Dropout used at training (match checkpoint)")
+    ap.add_argument("--max_new_tokens", type=int, default=40, help="Tokens to generate per turn")
+    ap.add_argument("--pad_token_id", type=int, default=0, help="Pad token id for context")
+    ap.add_argument("--temperature", type=float, default=1.0, help="Sampling temperature")
+    ap.add_argument("--top_k", type=int, default=0, help="Top-k sampling (0 = disabled)")
+    ap.add_argument("--device", type=str, default=None, help="cpu/cuda")
     args = ap.parse_args()
 
-    exp = Experiment.from_yaml(args.config)
-    if not getattr(exp, "tokenizer", None):
-        raise SystemExit("Current config is not in token stimulus mode.")
-    tok = Tokenizer.from_file(exp.stimuli_cfg.get("tokenizer"))
+    device = resolve_device(args.device)
 
-    print("Interactive brain chat (type 'exit' to quit)")
+    tokenizer = Tokenizer.from_file(args.tokenizer)
+    vocab_size = tokenizer.get_vocab_size()
+
+    # Load a single brain vector and keep it fixed for the session
+    brain_vec = load_brain_vector(args.brain_dataset, args.brain_index).unsqueeze(0).to(device)
+
+    # Load model
+    model = LanguageModel(
+        vocab_size=vocab_size,
+        hidden_dim=args.hidden_dim,
+        num_layers=args.num_layers,
+        attn_heads=args.attn_heads,
+        dropout=args.dropout,
+        brain_dim=brain_vec.shape[-1],
+    ).to(device)
+    state = torch.load(args.ckpt, map_location=device)
+    model.load_state_dict(state)
+    model.eval()
+
+    print("Interactive brain chat (type 'exit' or 'quit' to stop)")
     while True:
-        try:
-            text = input("You: ").strip()
-        except (EOFError, KeyboardInterrupt):
-            print()
-            break
-        if not text:
-            continue
-        if text.lower() in {"exit", "quit"}:
+        user = input("You: ").strip()
+        if user.lower() in {"exit", "quit"}:
             break
 
-        encoded = tok.encode(text)
-        response_ids = run_prompt(exp, args.snr, encoded.ids, args.max_response)
-        if not response_ids:
-            print("Brain: (no response)")
+        # --- Turn-level context: only current user message ---
+        user_tokens = tokenizer.encode(user).ids
+        if not user_tokens:
+            print("Brain: ")
             continue
-        decoded = tok.decode(response_ids)
-        print(f"Brain: {decoded}")
+
+        # Prepare model input for this turn
+        ctx = crop_context(user_tokens, args.block_size, args.pad_token_id).unsqueeze(0).to(device)
+
+        with torch.no_grad():
+            cur_ids = ctx
+            start_len = cur_ids.shape[1]
+            for _ in range(args.max_new_tokens):
+                logits = model(cur_ids, brain_vec)  # (1, seq_len, vocab)
+                next_logits = logits[:, -1, :]      # (1, vocab)
+                next_id = sample_next_token(
+                    next_logits,
+                    temperature=args.temperature,
+                    top_k=args.top_k,
+                )
+                cur_ids = torch.cat([cur_ids, next_id], dim=1)
+
+        generated = cur_ids[0].tolist()
+        new_tokens = generated[start_len:]
+        # Strip pads from the printed response
+        response_tokens = [t for t in new_tokens if t != args.pad_token_id]
+        text = tokenizer.decode(response_tokens) if response_tokens else ""
+        print(f"Brain: {text}")
 
 
 if __name__ == "__main__":

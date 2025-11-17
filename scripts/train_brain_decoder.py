@@ -38,12 +38,16 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", type=Path, default=Path("data/brain_multiclass.npz"))
     ap.add_argument("--out_dir", type=Path, default=Path("models"))
+<<<<<<< HEAD
     ap.add_argument("--epochs", type=int, default=50)
     ap.add_argument("--batch_size", type=int, default=128)
     ap.add_argument("--hidden_dim", type=int, default=512)
     ap.add_argument("--num_layers", type=int, default=3)
     ap.add_argument("--dropout", type=float, default=0.1)
     ap.add_argument("--lr", type=float, default=1e-3)
+=======
+    ap.add_argument("--epochs", type=int, default=20)
+>>>>>>> a7cd2f3 (Trying autoregressive)
     ap.add_argument("--tokenizer", type=str, default=None, help="Optional tokenizer path for metadata")
     args = ap.parse_args()
 
@@ -58,12 +62,16 @@ def main():
 
     print("Loaded data:", X.shape, y.shape, "num_classes:", num_classes)
 
+<<<<<<< HEAD
     mean = X.mean(axis=0, keepdims=True)
     std = X.std(axis=0, keepdims=True)
     std[std < 1e-6] = 1e-6
     X = (X - mean) / std
 
     dataset = TensorDataset(torch.from_numpy(X.astype(np.float32)), torch.from_numpy(y))
+=======
+    dataset = TensorDataset(torch.from_numpy(X), torch.from_numpy(y))
+>>>>>>> a7cd2f3 (Trying autoregressive)
     n = len(dataset)
     n_train = int(0.8 * n)
     n_val = n - n_train

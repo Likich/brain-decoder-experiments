@@ -297,7 +297,10 @@ class Experiment:
             stimulus_id=stimulus_id,
             stimulus_token=stim_token,
             activity_snapshot=activity_snapshot,
+<<<<<<< HEAD
             decoder_snapshot=decoder_snapshot,
+=======
+>>>>>>> a7cd2f3 (Trying autoregressive)
             generated_tokens=generated_tokens,
             generated_token_ids=generated_token_ids,
             target_token_id=target_token_id,
