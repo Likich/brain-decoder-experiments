@@ -38,22 +38,51 @@ class LocalDecoderNet(nn.Module):
         num_layers: int = 2,
         num_classes: int = 5,
         dropout: float = 0.1,
+        use_attention: bool = False,
+        attn_heads: int = 4,
+        attn_layers: int = 1,
     ):
         super().__init__()
-        layers = []
-        dim = in_dim
-        for _ in range(max(0, num_layers)):
-            layers.append(nn.Linear(dim, hidden_dim))
-            layers.append(nn.ReLU())
-            layers.append(nn.LayerNorm(hidden_dim))
-            if dropout > 0:
-                layers.append(nn.Dropout(dropout))
-            dim = hidden_dim
-        layers.append(nn.Linear(dim, num_classes))
-        self.net = nn.Sequential(*layers)
+        self.use_attention = use_attention
+        if use_attention:
+            if hidden_dim % max(1, attn_heads) != 0:
+                raise ValueError("hidden_dim must be divisible by attn_heads")
+            self.input_proj = nn.Linear(1, hidden_dim)
+            encoder_layer = nn.TransformerEncoderLayer(
+                d_model=hidden_dim,
+                nhead=attn_heads,
+                dropout=dropout,
+                batch_first=True,
+            )
+            self.attn = nn.TransformerEncoder(encoder_layer, num_layers=attn_layers)
+            self.head = nn.Sequential(
+                nn.LayerNorm(hidden_dim),
+                nn.Linear(hidden_dim, hidden_dim),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(hidden_dim, num_classes),
+            )
+        else:
+            layers = []
+            dim = in_dim
+            for _ in range(max(0, num_layers)):
+                layers.append(nn.Linear(dim, hidden_dim))
+                layers.append(nn.ReLU())
+                layers.append(nn.LayerNorm(hidden_dim))
+                if dropout > 0:
+                    layers.append(nn.Dropout(dropout))
+                dim = hidden_dim
+            layers.append(nn.Linear(dim, num_classes))
+            self.net = nn.Sequential(*layers)
 
     def forward(self, x):
-        return self.net(x)
+        if not self.use_attention:
+            return self.net(x)
+        h = x.unsqueeze(-1)
+        h = self.input_proj(h)
+        h = self.attn(h)
+        pooled = h.mean(dim=1)
+        return self.head(pooled)
 
 
 class LocalDecoderLLM:
@@ -86,12 +115,19 @@ class LocalDecoderLLM:
         num_layers = int(ckpt.get("num_layers", 2))
         dropout = float(ckpt.get("dropout", 0.0))
 
+        use_attention = bool(ckpt.get("use_attention", False))
+        attn_heads = int(ckpt.get("attn_heads", 4))
+        attn_layers = int(ckpt.get("attn_layers", 1))
+
         self.model = LocalDecoderNet(
             in_dim=in_dim,
             hidden_dim=hidden_dim,
             num_layers=num_layers,
             num_classes=num_classes,
             dropout=dropout,
+            use_attention=use_attention,
+            attn_heads=attn_heads,
+            attn_layers=attn_layers,
         )
         self.model.load_state_dict(ckpt["state_dict"])
         self.model.to(device)

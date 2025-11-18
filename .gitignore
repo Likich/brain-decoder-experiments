@@ -24,6 +24,7 @@ outputs/
 models/
 runs/
 data/
+brain.zip
 
 # --- Logs / temp ---
 *.log

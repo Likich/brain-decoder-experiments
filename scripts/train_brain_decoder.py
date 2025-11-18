@@ -28,6 +28,7 @@ class BrainDecoder(nn.Module):
     ):
         super().__init__()
         self.use_attention = use_attention
+        self.dropout = dropout
         if use_attention:
             if hidden_dim % attn_heads != 0:
                 raise ValueError("hidden_dim must be divisible by attn_heads")
