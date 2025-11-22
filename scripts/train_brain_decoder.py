@@ -163,13 +163,12 @@ def main():
             loss = crit(logits, yb)
             optim.zero_grad()
             loss.backward()
-            if args.clip_grad_norm and args.clip_grad_norm > 0:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip_grad_norm)
             optim.step()
             train_loss += loss.item() * yb.size(0)
             preds = torch.argmax(logits, dim=-1)
             train_correct += (preds == yb).sum().item()
             train_seen += yb.size(0)
+
         train_loss /= max(1, train_seen)
         train_acc = train_correct / train_seen if train_seen else 0.0
         val_acc, val_loss = eval_loader(val_loader)

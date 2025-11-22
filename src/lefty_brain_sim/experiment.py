@@ -318,17 +318,7 @@ class Experiment:
             for token, idx in vocab.items():
                 if 0 <= idx < len(class_names):
                     class_names[idx] = token
-            schedule_state = self.stimuli_cfg.get("schedule_state")
-            random_start = bool(self.stimuli_cfg.get("schedule_random_start", False))
-            persist_stride = int(self.stimuli_cfg.get("schedule_persist_stride", 128))
-            schedule_seed = int(self.stimuli_cfg.get("schedule_seed", self.cfg.seed))
-            self.token_schedule = TokenSchedule(
-                sched_path,
-                state_path=schedule_state,
-                random_start=random_start,
-                seed=schedule_seed,
-                persist_every=persist_stride,
-            )
+            self.token_schedule = TokenSchedule(sched_path)
         else:
             class_names = ["APPLE", "BANANA", "GRAPE", "ORANGE", "PEAR"]
 
