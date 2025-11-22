@@ -1,4 +1,3 @@
-cat > .gitignore << 'EOF'
 # --- Python junk ---
 __pycache__/
 *.py[cod]
@@ -19,7 +18,7 @@ env/
 .idea/
 *.swp
 
-# --- Outputs / artifacts ---
+# --- Outputs / artifacts (large or generated) ---
 outputs/
 models/
 runs/
@@ -33,4 +32,3 @@ brain.zip
 
 # --- Jupyter ---
 .ipynb_checkpoints/
-EOF
