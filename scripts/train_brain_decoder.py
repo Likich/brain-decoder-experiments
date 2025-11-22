@@ -83,13 +83,12 @@ def main():
     ap.add_argument("--attn_heads", type=int, default=4)
     ap.add_argument("--attn_layers", type=int, default=1)
     ap.add_argument("--lr", type=float, default=1e-3)
+    ap.add_argument("--tokenizer", type=str, default=None, help="Optional tokenizer path for metadata")
     ap.add_argument("--label_smoothing", type=float, default=0.0)
-    ap.add_argument("--clip_grad_norm", type=float, default=0.0)
-    ap.add_argument("--use_scheduler", action="store_true")
+    ap.add_argument("--clip_grad_norm", type=float, default=0.0, help="Max grad norm; 0 disables clipping")
+    ap.add_argument("--use_scheduler", action="store_true", help="Enable ReduceLROnPlateau scheduler on validation loss")
     ap.add_argument("--scheduler_factor", type=float, default=0.5)
     ap.add_argument("--scheduler_patience", type=int, default=2)
-    ap.add_argument("--device", type=str, default=None)
-    ap.add_argument("--tokenizer", type=str, default=None)
     args = ap.parse_args()
 
     data = np.load(args.data, allow_pickle=True)
@@ -125,7 +124,7 @@ def main():
     model.to(device)
 
     optim = torch.optim.AdamW(model.parameters(), lr=args.lr)
-    crit = nn.CrossEntropyLoss(label_smoothing=args.label_smoothing)
+    crit = nn.CrossEntropyLoss(label_smoothing=max(0.0, float(args.label_smoothing)))
     scheduler = None
     if args.use_scheduler:
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -145,33 +144,40 @@ def main():
                 xb, yb = xb.to(device), yb.to(device)
                 logits = model(xb)
                 loss = crit(logits, yb)
-                loss_sum += loss.item() * yb.size(0)
                 pred = logits.argmax(dim=-1)
                 correct += (pred == yb).sum().item()
                 total += yb.numel()
+                loss_sum += loss.item() * yb.size(0)
         acc = correct / total if total else 0.0
-        avg_loss = loss_sum / total if total else 0.0
-        return acc, avg_loss
+        loss_avg = loss_sum / total if total else 0.0
+        return acc, loss_avg
 
     for ep in range(1, args.epochs + 1):
         model.train()
+        train_loss = 0.0
+        train_correct = 0
+        train_seen = 0
         for xb, yb in train_loader:
             xb, yb = xb.to(device), yb.to(device)
-            loss = crit(model(xb), yb)
+            logits = model(xb)
+            loss = crit(logits, yb)
             optim.zero_grad()
             loss.backward()
             if args.clip_grad_norm and args.clip_grad_norm > 0:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip_grad_norm)
             optim.step()
-
-        acc_train, train_loss = eval_loader(train_loader)
-        acc_val, val_loss = eval_loader(val_loader)
+            train_loss += loss.item() * yb.size(0)
+            preds = torch.argmax(logits, dim=-1)
+            train_correct += (preds == yb).sum().item()
+            train_seen += yb.size(0)
+        train_loss /= max(1, train_seen)
+        train_acc = train_correct / train_seen if train_seen else 0.0
+        val_acc, val_loss = eval_loader(val_loader)
         if scheduler is not None:
             scheduler.step(val_loss)
         print(
-            f"Epoch {ep:02d} | "
-            f"train acc={acc_train:.3f} loss={train_loss:.4f} | "
-            f"val acc={acc_val:.3f} loss={val_loss:.4f}"
+            f"Epoch {ep:02d} | train loss={train_loss:.4f} acc={train_acc:.3f} | "
+            f"val loss={val_loss:.4f} acc={val_acc:.3f}"
         )
 
     args.out_dir.mkdir(parents=True, exist_ok=True)

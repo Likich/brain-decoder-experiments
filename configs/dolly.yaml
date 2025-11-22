@@ -30,10 +30,10 @@ speed_accuracy: fast
 stimuli:
   mode: tokens
   predict_next: true
-  schedule: data/wiki40b_tokens.jsonl
+  schedule: data/dolly_tokens.jsonl
   schedule_persist_stride: 256
   schedule_random_start: true
-  schedule_state: data/wiki40b_tokens_state.json
+  schedule_state: data/dolly_tokens_state.json
   tokenizer: models/wiki_tokenizer.json
 trials: 400
 tvb:
