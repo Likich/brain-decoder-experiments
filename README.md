@@ -49,31 +49,55 @@ The resulting JSONL in `data/` can seed your token-level stimulus pipeline.
 2. `python scripts/encode_corpus_tokens.py --tokenizer models/wiki_tokenizer.json`
    emits token-id sequences to `data/wiki40b_tokens.jsonl`, ready for ingestion.
 
-### Token stimulus pipeline
-1. Download corpus + train tokenizer (see above).
-2. Ensure `configs/default.yaml` has `stimuli.mode: "tokens"` plus the tokenizer
-   and `data/wiki40b_tokens.jsonl` schedule paths.
-3. Run the simulator: `python scripts/run_experiment.py --config configs/default.yaml`
-   to fill `outputs/experiment.jsonl`.
-4. Build a training set: `python scripts/build_dataset.py --input outputs/experiment.jsonl --tokenizer models/wiki_tokenizer.json --out data/brain_tokens.npz`.
-5. To train for *next-token* prediction (needed for generation), re-run dataset building with the `--use-target` flag once you've enabled `stimuli.predict_next: true` in the config:
+### Brain-conditioned next-token pipeline (recommended)
+This ties cortex snapshots directly into a transformer LM and works with 136-region TVB.
+1) Train tokenizer + get token schedule (see above).
+2) Generate paired data (context, brain snapshot, next token):
+   ```
+   python scripts/build_brain_conditioned_dataset.py \
+     --config configs/default.yaml \
+     --token_file data/wiki40b_tokens.jsonl \
+     --out data/brain_ctx_pairs_100k.npz \
+     --max_samples 100000 --snr high
+   ```
+3) Train the brain-conditioned LM:
+   ```
+   python scripts/train_language_model.py \
+     --data_file dummy.txt \
+     --tokenizer_file models/wiki_tokenizer.json \
+     --brain_dataset data/brain_ctx_pairs_100k.npz \
+     --epochs 10 --batch_size 32 --block_size 96 \
+     --hidden_dim 384 --num_layers 2 --attn_heads 8 \
+     --lr 3.9e-4 --dropout 0.11 --device cuda
+   ```
+4) Chat with the trained model:
+   ```
+   python scripts/brain_chat.py \
+     --tokenizer models/wiki_tokenizer.json \
+     --ckpt models/language_model.pt \
+     --brain_dataset data/brain_ctx_pairs_100k.npz \
+     --brain_index 0 --block_size 96 \
+     --hidden_dim 384 --num_layers 2 --attn_heads 8 --dropout 0.11
+   ```
+
+### Legacy local decoder pipeline (fruits/5-way)
+If you still want the simple classifier path:
+1. Run simulator to produce `outputs/experiment.jsonl`.
+2. Build dataset:
    ```
    python scripts/build_dataset.py --input outputs/experiment.jsonl \
-       --tokenizer models/wiki_tokenizer.json --use-target --out data/brain_next_token.npz
+       --tokenizer models/wiki_tokenizer.json --use-target \
+       --out data/brain_next_token.npz
    ```
-6. Train the local decoder on that dataset:
+3. Train decoder:
    ```
    python scripts/train_brain_decoder.py --data data/brain_next_token.npz \
-       --tokenizer models/wiki_tokenizer.json
+       --tokenizer models/wiki_tokenizer.json --use_attention
    ```
-6. Repeat steps 3–5 as you collect new cortex activity (the decoder consumes the metadata written in step 5).
+4. Set `llm_provider: "local_decoder"` in `configs/default.yaml` to use it.
 
-### Interactive chat
-With `stimuli.predict_next: true` and the next-token decoder in place, launch a simple REPL:
-```
-python scripts/brain_chat.py --config configs/default.yaml --max_response 32
-```
-Type a prompt (e.g., `Hi`) and the simulator will tokenize it, run the cortex dynamics, and autoregressively emit a short response decoded via the tokenizer.
+### Interactive chat (brain-conditioned)
+See step 4 above; `scripts/brain_chat.py` now wraps the brain-conditioned LM. Type `quit` to exit.
 
 ## Generative loop
 Set `generation.enabled: true` (default) to have each trial roll into an
