@@ -36,6 +36,12 @@ def main():
     ap.add_argument("--config", type=Path, required=True, help="Experiment YAML config (must use token stimuli)")
     ap.add_argument("--token_file", type=Path, default=None, help="JSONL with encoded tokens (defaults to config stimuli schedule)")
     ap.add_argument("--out", type=Path, default=Path("data/brain_ctx_pairs.npz"))
+    ap.add_argument(
+        "--brain_dim",
+        type=int,
+        default=None,
+        help="Optional brain vector dimension; trims or zero-pads snapshots to this size",
+    )
     ap.add_argument("--max_samples", type=int, default=None, help="Maximum number of sequential samples to record")
     ap.add_argument("--start_offset", type=int, default=0, help="Skip this many tokens before logging samples")
     ap.add_argument("--snr", type=str, default=None, help="Override SNR level (otherwise cycle config levels)")
@@ -93,6 +99,16 @@ def main():
         raise SystemExit("No samples recorded. Try adjusting start_offset/snr/config.")
 
     brain_arr = np.asarray(brain_vecs, dtype=np.float32)
+    if args.brain_dim is not None:
+        target_dim = args.brain_dim
+        cur_dim = brain_arr.shape[1]
+        if target_dim < cur_dim:
+            brain_arr = brain_arr[:, :target_dim]
+        elif target_dim > cur_dim:
+            padded = np.zeros((brain_arr.shape[0], target_dim), dtype=np.float32)
+            padded[:, :cur_dim] = brain_arr
+            brain_arr = padded
+
     target_arr = np.asarray(targets, dtype=np.int64)
     contexts_arr = np.array(contexts, dtype=object)
 
@@ -102,6 +118,7 @@ def main():
         contexts=contexts_arr,
         brain=brain_arr,
         targets=target_arr,
+        brain_dim=int(brain_arr.shape[1]),
         tokenizer=str(exp.stimuli_cfg.get("tokenizer")),
         schedule=str(token_path),
     )

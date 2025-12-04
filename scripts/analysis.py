@@ -19,9 +19,16 @@ import argparse
 import math
 import numpy as np
 import torch
+import sys
+from pathlib import Path
 from tokenizers import Tokenizer
 
-from scripts.train_language_model import LanguageModel
+# Make sure repo root is on the path when executed as a script
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from scripts.train_language_model import LanguageModel  # noqa: E402
 
 
 def resolve_device(arg: str | None) -> torch.device:
