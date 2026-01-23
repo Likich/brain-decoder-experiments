@@ -69,6 +69,7 @@ def main() -> None:
     ap.add_argument("--pad_token_id", type=int, default=0)
     ap.add_argument("--samples", type=int, default=5000, help="Number of samples to evaluate")
     ap.add_argument("--device", type=str, default=None)
+    ap.add_argument("--freeze_brain_proj", action="store_true", help="Zero-out brain projection weights before eval")
     args = ap.parse_args()
 
     device = resolve_device(args.device)
@@ -93,6 +94,14 @@ def main() -> None:
     state = torch.load(args.ckpt, map_location=device)
     model.load_state_dict(state)
     model.eval()
+    if args.freeze_brain_proj and getattr(model, "brain_proj", None) is not None:
+        with torch.no_grad():
+            model.brain_proj.weight.zero_()
+            if model.brain_proj.bias is not None:
+                model.brain_proj.bias.zero_()
+        for p in model.brain_proj.parameters():
+            p.requires_grad = False
+        print("Brain projection frozen to zero.")
 
     # Precompute stats and permutation
     mu = brain.mean(dim=0, keepdim=True)
