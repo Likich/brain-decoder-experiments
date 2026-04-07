@@ -34,7 +34,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scripts.train_language_model import LanguageModel  # noqa: E402
+from scripts.train_language_model import LanguageModel, BrainCrossAttentionLM  # noqa: E402
 
 
 def resolve_device(arg: str | None) -> torch.device:
@@ -70,6 +70,14 @@ def main() -> None:
     ap.add_argument("--samples", type=int, default=5000, help="Number of samples to evaluate")
     ap.add_argument("--device", type=str, default=None)
     ap.add_argument("--freeze_brain_proj", action="store_true", help="Zero-out brain projection weights before eval")
+    ap.add_argument(
+        "--brain_fusion",
+        type=str,
+        default="add",
+        choices=["add", "cross_attn"],
+        help="Brain conditioning mechanism",
+    )
+    ap.add_argument("--brain_tokens", type=int, default=4, help="Number of brain memory tokens (cross_attn)")
     args = ap.parse_args()
 
     device = resolve_device(args.device)
@@ -83,14 +91,27 @@ def main() -> None:
     targets = torch.tensor(data["targets"], dtype=torch.long)
     brain_dim = brain.shape[1]
 
-    model = LanguageModel(
-        vocab_size=vocab_size,
-        hidden_dim=args.hidden_dim,
-        num_layers=args.num_layers,
-        attn_heads=args.attn_heads,
-        dropout=args.dropout,
-        brain_dim=brain_dim,
-    ).to(device)
+    if args.brain_fusion == "cross_attn":
+        model = BrainCrossAttentionLM(
+            vocab_size=vocab_size,
+            hidden_dim=args.hidden_dim,
+            num_layers=args.num_layers,
+            attn_heads=args.attn_heads,
+            dropout=args.dropout,
+            brain_dim=brain_dim,
+            brain_tokens=args.brain_tokens,
+            pad_token_id=args.pad_token_id,
+        ).to(device)
+    else:
+        model = LanguageModel(
+            vocab_size=vocab_size,
+            hidden_dim=args.hidden_dim,
+            num_layers=args.num_layers,
+            attn_heads=args.attn_heads,
+            dropout=args.dropout,
+            brain_dim=brain_dim,
+            pad_token_id=args.pad_token_id,
+        ).to(device)
     state = torch.load(args.ckpt, map_location=device)
     model.load_state_dict(state)
     model.eval()

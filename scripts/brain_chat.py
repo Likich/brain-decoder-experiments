@@ -19,7 +19,7 @@ import torch
 from tokenizers import Tokenizer
 
 # Reuse the language model definition
-from scripts.train_language_model import LanguageModel  # noqa: E402
+from scripts.train_language_model import LanguageModel, BrainCrossAttentionLM  # noqa: E402
 
 
 def resolve_device(arg: str | None) -> torch.device:
@@ -86,6 +86,14 @@ def main():
     ap.add_argument("--dropout", type=float, default=0.11, help="Dropout used at training (match checkpoint)")
     ap.add_argument("--max_new_tokens", type=int, default=40, help="Tokens to generate per turn")
     ap.add_argument("--pad_token_id", type=int, default=0, help="Pad token id for context")
+    ap.add_argument(
+        "--brain_fusion",
+        type=str,
+        default="add",
+        choices=["add", "cross_attn"],
+        help="Brain conditioning mechanism",
+    )
+    ap.add_argument("--brain_tokens", type=int, default=4, help="Number of brain memory tokens (cross_attn)")
     ap.add_argument("--temperature", type=float, default=1.0, help="Sampling temperature")
     ap.add_argument("--top_k", type=int, default=0, help="Top-k sampling (0 = disabled)")
     ap.add_argument("--device", type=str, default=None, help="cpu/cuda")
@@ -100,14 +108,27 @@ def main():
     brain_vec = load_brain_vector(args.brain_dataset, args.brain_index).unsqueeze(0).to(device)
 
     # Load model
-    model = LanguageModel(
-        vocab_size=vocab_size,
-        hidden_dim=args.hidden_dim,
-        num_layers=args.num_layers,
-        attn_heads=args.attn_heads,
-        dropout=args.dropout,
-        brain_dim=brain_vec.shape[-1],
-    ).to(device)
+    if args.brain_fusion == "cross_attn":
+        model = BrainCrossAttentionLM(
+            vocab_size=vocab_size,
+            hidden_dim=args.hidden_dim,
+            num_layers=args.num_layers,
+            attn_heads=args.attn_heads,
+            dropout=args.dropout,
+            brain_dim=brain_vec.shape[-1],
+            brain_tokens=args.brain_tokens,
+            pad_token_id=args.pad_token_id,
+        ).to(device)
+    else:
+        model = LanguageModel(
+            vocab_size=vocab_size,
+            hidden_dim=args.hidden_dim,
+            num_layers=args.num_layers,
+            attn_heads=args.attn_heads,
+            dropout=args.dropout,
+            brain_dim=brain_vec.shape[-1],
+            pad_token_id=args.pad_token_id,
+        ).to(device)
     state = torch.load(args.ckpt, map_location=device)
     model.load_state_dict(state)
     model.eval()

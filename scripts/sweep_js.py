@@ -21,7 +21,7 @@ import numpy as np
 import torch
 from tokenizers import Tokenizer
 
-from scripts.train_language_model import LanguageModel
+from scripts.train_language_model import LanguageModel, BrainCrossAttentionLM
 
 
 def resolve_device(arg: str | None) -> torch.device:
@@ -57,6 +57,14 @@ def main():
     ap.add_argument("--pad_token_id", type=int, default=0)
     ap.add_argument("--samples", type=int, default=5000, help="Number of samples to evaluate per dim")
     ap.add_argument("--device", type=str, default=None)
+    ap.add_argument(
+        "--brain_fusion",
+        type=str,
+        default="add",
+        choices=["add", "cross_attn"],
+        help="Brain conditioning mechanism",
+    )
+    ap.add_argument("--brain_tokens", type=int, default=4, help="Number of brain memory tokens (cross_attn)")
     ap.add_argument("--out_csv", type=str, default=None, help="Optional CSV to persist results")
     args = ap.parse_args()
 
@@ -70,14 +78,27 @@ def main():
     brain_full = torch.tensor(data["brain"], dtype=torch.float32)
     base_dim = brain_full.shape[1]
 
-    model = LanguageModel(
-        vocab_size=vocab_size,
-        hidden_dim=args.hidden_dim,
-        num_layers=args.num_layers,
-        attn_heads=args.attn_heads,
-        dropout=args.dropout,
-        brain_dim=base_dim,
-    ).to(device)
+    if args.brain_fusion == "cross_attn":
+        model = BrainCrossAttentionLM(
+            vocab_size=vocab_size,
+            hidden_dim=args.hidden_dim,
+            num_layers=args.num_layers,
+            attn_heads=args.attn_heads,
+            dropout=args.dropout,
+            brain_dim=base_dim,
+            brain_tokens=args.brain_tokens,
+            pad_token_id=args.pad_token_id,
+        ).to(device)
+    else:
+        model = LanguageModel(
+            vocab_size=vocab_size,
+            hidden_dim=args.hidden_dim,
+            num_layers=args.num_layers,
+            attn_heads=args.attn_heads,
+            dropout=args.dropout,
+            brain_dim=base_dim,
+            pad_token_id=args.pad_token_id,
+        ).to(device)
     state = torch.load(args.ckpt, map_location=device)
     model.load_state_dict(state)
     model.eval()
