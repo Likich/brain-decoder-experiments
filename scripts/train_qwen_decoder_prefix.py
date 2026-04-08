@@ -20,6 +20,7 @@ Example:
 """
 
 import argparse
+import sys
 from pathlib import Path
 from typing import List
 
@@ -94,9 +95,10 @@ class BrainPrefixCausalLM(nn.Module):
         self.brain_proj = nn.Linear(brain_dim, hidden * prefix_tokens)
 
     def forward(self, input_ids, attention_mask, brain_vec, labels=None):
-        inputs_embeds = self.base.get_input_embeddings()(input_ids)
+        embed_dtype = self.base.get_input_embeddings().weight.dtype
+        inputs_embeds = self.base.get_input_embeddings()(input_ids).to(embed_dtype)
         batch = input_ids.size(0)
-        prefix = self.brain_proj(brain_vec).view(batch, self.prefix_tokens, -1)
+        prefix = self.brain_proj(brain_vec).view(batch, self.prefix_tokens, -1).to(embed_dtype)
         inputs_embeds = torch.cat([prefix, inputs_embeds], dim=1)
 
         prefix_mask = torch.ones(batch, self.prefix_tokens, device=attention_mask.device)
@@ -128,6 +130,8 @@ def main() -> None:
     ap.add_argument("--device", type=str, default=None)
     ap.add_argument("--freeze_base", action="store_true", help="Train only brain_proj")
     ap.add_argument("--trust_remote_code", action="store_true")
+    ap.add_argument("--no_tqdm", action="store_true", help="Disable progress bar")
+    ap.add_argument("--log_interval", type=int, default=200, help="Steps between loss logs when tqdm is off")
     args = ap.parse_args()
 
     device = resolve_device(args.device)
@@ -181,8 +185,9 @@ def main() -> None:
         model.train()
         running = 0.0
         iterator = train_loader
-        if tqdm is not None:
-            iterator = tqdm(iterator, desc=f"epoch {epoch}")
+        use_tqdm = tqdm is not None and (not args.no_tqdm) and sys.stderr.isatty()
+        if use_tqdm:
+            iterator = tqdm(iterator, desc=f"epoch {epoch}", leave=False, mininterval=10)
         optimizer.zero_grad(set_to_none=True)
         for step, (input_ids, attn, brain_vec, labels) in enumerate(iterator, start=1):
             input_ids = input_ids.to(device)
@@ -199,6 +204,10 @@ def main() -> None:
                 optimizer.step()
                 scheduler.step()
                 optimizer.zero_grad(set_to_none=True)
+
+            if not use_tqdm and args.log_interval and step % args.log_interval == 0:
+                avg = running / step
+                print(f"epoch {epoch} step {step}/{len(train_loader)} train_loss={avg:.4f}")
 
         avg_train = running / max(1, len(train_loader))
 

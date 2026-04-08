@@ -25,6 +25,7 @@ Example:
 
 import argparse
 import json
+import multiprocessing as mp
 from pathlib import Path
 from typing import List
 
@@ -33,6 +34,7 @@ import numpy as np
 from transformers import AutoTokenizer
 
 from lefty_brain_sim.experiment import Experiment
+from lefty_brain_sim.utils import set_seed
 
 
 def iter_texts(path: Path):
@@ -91,6 +93,70 @@ def snapshot_from_trial(tr):
     return tr.decoder_snapshot or tr.activity_snapshot
 
 
+_WORK = {}
+
+
+def _init_worker(
+    config_path: str,
+    tokenizer_json: str,
+    token_out: str,
+    tokens: list[int],
+    snr_levels: list[str],
+    snr_override: str | None,
+    context_window: int | None,
+    base_seed: int,
+):
+    global _WORK
+    proc = mp.current_process()
+    worker_id = proc._identity[0] if proc._identity else 0
+    set_seed(base_seed + worker_id)
+
+    exp = Experiment.from_yaml(config_path)
+    exp.stimuli_cfg["tokenizer"] = tokenizer_json
+    exp.stimuli_cfg["schedule"] = token_out
+    exp.stimulus_mode = "tokens"
+    exp.predict_next = True
+    exp.class_names, exp.stim_patterns = exp._init_stimuli()
+
+    _WORK = {
+        "exp": exp,
+        "tokens": tokens,
+        "snr_levels": snr_levels,
+        "snr_override": snr_override,
+        "context_window": context_window,
+    }
+
+
+def _process_sample(task):
+    i, pos = task
+    exp = _WORK["exp"]
+    tokens = _WORK["tokens"]
+    snr_levels = _WORK["snr_levels"]
+    snr_override = _WORK["snr_override"]
+    context_window = _WORK["context_window"]
+
+    stim_id = int(tokens[pos])
+    target_id = int(tokens[pos + 1])
+    snr = snr_override or snr_levels[i % len(snr_levels)]
+
+    trial = exp.run_trial(
+        snr=snr,
+        stim_idx=stim_id,
+        allow_generation=False,
+        log_debug=False,
+    )
+    snap = snapshot_from_trial(trial)
+    if snap is None:
+        return None
+
+    if context_window is not None:
+        start = max(0, pos + 1 - context_window)
+        ctx = tokens[start : pos + 1]
+    else:
+        ctx = tokens[: pos + 1]
+    return i, ctx, snap, target_id
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Build brain dataset with HF tokenizer")
     ap.add_argument("--config", type=Path, required=True, help="Experiment YAML config")
@@ -104,6 +170,14 @@ def main() -> None:
     ap.add_argument("--start_offset", type=int, default=0)
     ap.add_argument("--snr", type=str, default=None)
     ap.add_argument("--report_every", type=int, default=100)
+    ap.add_argument("--num_workers", type=int, default=1, help="Parallel workers for TVB trials")
+    ap.add_argument("--chunksize", type=int, default=16, help="Chunk size for multiprocessing pool")
+    ap.add_argument(
+        "--context_window",
+        type=int,
+        default=None,
+        help="If set, store only the last N tokens per context to reduce file size",
+    )
     ap.add_argument("--trust_remote_code", action="store_true")
     args = ap.parse_args()
 
@@ -134,13 +208,8 @@ def main() -> None:
         report_every=args.report_every,
     )
 
-    # Build experiment and override token config
+    # Build experiment (for config access / snr levels)
     exp = Experiment.from_yaml(str(args.config))
-    exp.stimuli_cfg["tokenizer"] = str(tokenizer_json)
-    exp.stimuli_cfg["schedule"] = str(args.token_out)
-    exp.stimulus_mode = "tokens"
-    exp.predict_next = True
-    exp.class_names, exp.stim_patterns = exp._init_stimuli()
 
     total_possible = len(tokens) - 1 - args.start_offset
     if total_possible <= 0:
@@ -154,31 +223,75 @@ def main() -> None:
     targets: List[int] = []
     skipped = 0
 
-    exp.token_schedule.reset() if exp.token_schedule else None
+    tasks = [(i, args.start_offset + i) for i in range(limit)]
 
-    for i in range(limit):
-        pos = args.start_offset + i
-        stim_id = int(tokens[pos])
-        target_id = int(tokens[pos + 1])
-        snr = snr_override or snr_levels[i % len(snr_levels)]
+    if args.num_workers and args.num_workers > 1:
+        ctx = mp.get_context("spawn")
+        with ctx.Pool(
+            processes=args.num_workers,
+            initializer=_init_worker,
+            initargs=(
+                str(args.config),
+                str(tokenizer_json),
+                str(args.token_out),
+                tokens,
+                snr_levels,
+                snr_override,
+                args.context_window,
+                exp.cfg.seed,
+            ),
+        ) as pool:
+            results = []
+            for out in pool.imap_unordered(_process_sample, tasks, chunksize=args.chunksize):
+                if out is None:
+                    skipped += 1
+                    continue
+                results.append(out)
+                if args.report_every and len(results) % args.report_every == 0:
+                    print(f"Saved {len(results)} samples (skipped {skipped})")
+        # sort by original index
+        results.sort(key=lambda x: x[0])
+        for _, ctx_tokens, snap, target_id in results:
+            contexts.append(ctx_tokens)
+            brain_vecs.append(snap)
+            targets.append(target_id)
+    else:
+        # Single-process fallback
+        exp.stimuli_cfg["tokenizer"] = str(tokenizer_json)
+        exp.stimuli_cfg["schedule"] = str(args.token_out)
+        exp.stimulus_mode = "tokens"
+        exp.predict_next = True
+        exp.class_names, exp.stim_patterns = exp._init_stimuli()
 
-        trial = exp.run_trial(
-            snr=snr,
-            stim_idx=stim_id,
-            allow_generation=False,
-            log_debug=False,
-        )
-        snap = snapshot_from_trial(trial)
-        if snap is None:
-            skipped += 1
-            continue
+        exp.token_schedule.reset() if exp.token_schedule else None
 
-        contexts.append(tokens[: pos + 1])
-        brain_vecs.append(snap)
-        targets.append(target_id)
+        for i in range(limit):
+            pos = args.start_offset + i
+            stim_id = int(tokens[pos])
+            target_id = int(tokens[pos + 1])
+            snr = snr_override or snr_levels[i % len(snr_levels)]
 
-        if args.report_every and len(contexts) % args.report_every == 0:
-            print(f"Saved {len(contexts)} samples (skipped {skipped})")
+            trial = exp.run_trial(
+                snr=snr,
+                stim_idx=stim_id,
+                allow_generation=False,
+                log_debug=False,
+            )
+            snap = snapshot_from_trial(trial)
+            if snap is None:
+                skipped += 1
+                continue
+
+            if args.context_window is not None:
+                start = max(0, pos + 1 - args.context_window)
+                contexts.append(tokens[start : pos + 1])
+            else:
+                contexts.append(tokens[: pos + 1])
+            brain_vecs.append(snap)
+            targets.append(target_id)
+
+            if args.report_every and len(contexts) % args.report_every == 0:
+                print(f"Saved {len(contexts)} samples (skipped {skipped})")
 
     if not contexts:
         raise SystemExit("No samples recorded. Try adjusting start_offset/snr/config.")
