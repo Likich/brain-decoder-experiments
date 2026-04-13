@@ -42,6 +42,19 @@ def resolve_device(arg: str | None) -> torch.device:
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
+def get_transformer_blocks(model):
+    # Common decoder-only layouts
+    if hasattr(model, "model") and hasattr(model.model, "layers"):
+        return model.model.layers
+    if hasattr(model, "transformer") and hasattr(model.transformer, "h"):
+        return model.transformer.h
+    if hasattr(model, "gpt_neox") and hasattr(model.gpt_neox, "layers"):
+        return model.gpt_neox.layers
+    if hasattr(model, "model") and hasattr(model.model, "h"):
+        return model.model.h
+    raise ValueError("Could not locate transformer blocks to unfreeze")
+
+
 class BrainPrefixDataset(Dataset):
     def __init__(
         self,
@@ -129,6 +142,12 @@ def main() -> None:
     ap.add_argument("--val_ratio", type=float, default=0.1)
     ap.add_argument("--device", type=str, default=None)
     ap.add_argument("--freeze_base", action="store_true", help="Train only brain_proj")
+    ap.add_argument(
+        "--unfreeze_last_n",
+        type=int,
+        default=0,
+        help="Unfreeze last N transformer blocks (use with --freeze_base)",
+    )
     ap.add_argument("--trust_remote_code", action="store_true")
     ap.add_argument("--no_tqdm", action="store_true", help="Disable progress bar")
     ap.add_argument("--log_interval", type=int, default=200, help="Steps between loss logs when tqdm is off")
@@ -172,6 +191,21 @@ def main() -> None:
     if args.freeze_base:
         for p in model.base.parameters():
             p.requires_grad = False
+        if args.unfreeze_last_n and args.unfreeze_last_n > 0:
+            blocks = get_transformer_blocks(model.base)
+            for layer in blocks[-args.unfreeze_last_n :]:
+                for p in layer.parameters():
+                    p.requires_grad = True
+            # Try to unfreeze final norms if present
+            for name in ("norm", "ln_f", "final_layernorm"):
+                mod = getattr(getattr(model.base, "model", model.base), name, None)
+                if mod is not None:
+                    for p in mod.parameters():
+                        p.requires_grad = True
+            # LM head can help adapt if present
+            if hasattr(model.base, "lm_head"):
+                for p in model.base.lm_head.parameters():
+                    p.requires_grad = True
 
     optimizer = torch.optim.AdamW(
         filter(lambda p: p.requires_grad, model.parameters()),

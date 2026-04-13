@@ -40,6 +40,19 @@ def resolve_device(arg: str | None) -> torch.device:
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
+def get_transformer_blocks(model):
+    # Encoder-decoder layouts (try encoder first, then decoder)
+    if hasattr(model, "model") and hasattr(model.model, "encoder") and hasattr(model.model.encoder, "block"):
+        return model.model.encoder.block
+    if hasattr(model, "model") and hasattr(model.model, "decoder") and hasattr(model.model.decoder, "block"):
+        return model.model.decoder.block
+    if hasattr(model, "encoder") and hasattr(model.encoder, "block"):
+        return model.encoder.block
+    if hasattr(model, "decoder") and hasattr(model.decoder, "block"):
+        return model.decoder.block
+    raise ValueError("Could not locate seq2seq blocks to unfreeze")
+
+
 class BrainPrefixSeq2SeqDataset(Dataset):
     def __init__(
         self,
@@ -114,6 +127,12 @@ def main() -> None:
     ap.add_argument("--val_ratio", type=float, default=0.1)
     ap.add_argument("--device", type=str, default=None)
     ap.add_argument("--freeze_base", action="store_true", help="Train only brain_proj")
+    ap.add_argument(
+        "--unfreeze_last_n",
+        type=int,
+        default=0,
+        help="Unfreeze last N transformer blocks (use with --freeze_base)",
+    )
     ap.add_argument("--trust_remote_code", action="store_true")
     ap.add_argument("--no_tqdm", action="store_true", help="Disable progress bar")
     ap.add_argument("--log_interval", type=int, default=200, help="Steps between loss logs when tqdm is off")
@@ -157,6 +176,20 @@ def main() -> None:
     if args.freeze_base:
         for p in model.base.parameters():
             p.requires_grad = False
+        if args.unfreeze_last_n and args.unfreeze_last_n > 0:
+            blocks = get_transformer_blocks(model.base)
+            for layer in blocks[-args.unfreeze_last_n :]:
+                for p in layer.parameters():
+                    p.requires_grad = True
+            # Try to unfreeze final norms / lm_head if present
+            for name in ("final_layer_norm", "layer_norm", "norm"):
+                mod = getattr(getattr(model.base, "model", model.base), name, None)
+                if mod is not None:
+                    for p in mod.parameters():
+                        p.requires_grad = True
+            if hasattr(model.base, "lm_head"):
+                for p in model.base.lm_head.parameters():
+                    p.requires_grad = True
 
     optimizer = torch.optim.AdamW(
         filter(lambda p: p.requires_grad, model.parameters()),
