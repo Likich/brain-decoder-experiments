@@ -30,6 +30,13 @@ def main() -> None:
     ap.add_argument("--out_dir", type=Path, required=True)
     ap.add_argument("--shard_size", type=int, default=5000)
     ap.add_argument("--max_context_words", type=int, default=100)
+    ap.add_argument(
+        "--max_context_tokens",
+        type=int,
+        default=None,
+        help="Max encoder tokens; defaults to tokenizer.model_max_length if reasonable",
+    )
+    ap.add_argument("--max_examples", type=int, default=None)
     ap.add_argument("--tmin", type=float, default=-0.5, help="seconds before word onset")
     ap.add_argument("--tmax", type=float, default=0.0, help="seconds before word onset")
     ap.add_argument("--word_column", type=str, default="word", help="events.tsv column for word")
@@ -43,6 +50,16 @@ def main() -> None:
         tokenizer.pad_token = tokenizer.eos_token or tokenizer.unk_token
 
     writer = ShardWriter(args.out_dir, prefix="meg", shard_size=args.shard_size)
+    # decide max token length for encoder
+    max_ctx_tokens = args.max_context_tokens
+    if max_ctx_tokens is None:
+        tok_max = getattr(tokenizer, "model_max_length", None)
+        if tok_max and tok_max < 100000:
+            max_ctx_tokens = int(tok_max)
+        else:
+            max_ctx_tokens = 512
+    # avoid tokenizer warnings by enforcing truncation
+    tokenizer.model_max_length = max_ctx_tokens
 
     subjects = [args.subject] if args.subject else sorted([p.name for p in args.preprocessed_root.glob("sub-*")])
 
@@ -101,7 +118,12 @@ def main() -> None:
                 for i, (word, onset) in enumerate(zip(words, onsets)):
                     ctx_words = words[max(0, i - args.max_context_words) : i]
                     ctx_text = " ".join(ctx_words)
-                    ctx_ids = tokenizer.encode(ctx_text, add_special_tokens=False)
+                    ctx_ids = tokenizer(
+                        ctx_text,
+                        add_special_tokens=False,
+                        truncation=True,
+                        max_length=max_ctx_tokens,
+                    ).input_ids
                     tgt_ids = tokenizer.encode(word, add_special_tokens=False)
                     if len(tgt_ids) == 0:
                         continue
@@ -130,6 +152,14 @@ def main() -> None:
                     }
                     writer.add(item)
                     total += 1
+                    if args.max_examples and total >= args.max_examples:
+                        break
+                if args.max_examples and total >= args.max_examples:
+                    break
+            if args.max_examples and total >= args.max_examples:
+                break
+        if args.max_examples and total >= args.max_examples:
+            break
 
     manifest = writer.finalize()
     manifest.update({
@@ -137,6 +167,7 @@ def main() -> None:
         "tmin": args.tmin,
         "tmax": args.tmax,
         "max_context_words": args.max_context_words,
+        "max_context_tokens": max_ctx_tokens,
     })
     write_manifest(args.out_dir / "manifest.json", manifest)
     log(f"Saved {total} examples to {args.out_dir}")
