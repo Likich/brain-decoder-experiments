@@ -10,11 +10,19 @@ import torch
 def pad_sequence(seqs: List[np.ndarray], pad_value: float = 0.0, dtype=torch.float32):
     lengths = [len(s) for s in seqs]
     max_len = max(lengths)
-    dim = seqs[0].shape[1]
+    first = np.asarray(seqs[0])
+    if first.ndim != 2:
+        raise ValueError(f"brain_seq must be 2D [T,D], got shape {first.shape}")
+    dim = first.shape[1]
     out = torch.full((len(seqs), max_len, dim), pad_value, dtype=dtype)
     mask = torch.zeros((len(seqs), max_len), dtype=torch.long)
     for i, seq in enumerate(seqs):
-        cur = torch.tensor(seq, dtype=dtype)
+        arr = np.asarray(seq)
+        # When shards were saved with `dtype=object`, NumPy can return object arrays
+        # even for numeric matrices. Cast back to a real numeric dtype.
+        if arr.dtype == object:
+            arr = arr.astype(np.float32, copy=False)
+        cur = torch.tensor(arr, dtype=dtype)
         out[i, : len(seq), :] = cur
         mask[i, : len(seq)] = 1
     return out, mask
@@ -26,7 +34,10 @@ def pad_tokens(seqs: List[np.ndarray], pad_id: int, dtype=torch.long):
     out = torch.full((len(seqs), max_len), pad_id, dtype=dtype)
     mask = torch.zeros((len(seqs), max_len), dtype=torch.long)
     for i, seq in enumerate(seqs):
-        cur = torch.tensor(seq, dtype=dtype)
+        arr = np.asarray(seq)
+        if arr.dtype == object:
+            arr = arr.astype(np.int64, copy=False)
+        cur = torch.tensor(arr, dtype=dtype)
         out[i, : len(seq)] = cur
         mask[i, : len(seq)] = 1
     return out, mask
