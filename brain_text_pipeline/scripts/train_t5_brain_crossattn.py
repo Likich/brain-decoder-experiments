@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -59,24 +60,46 @@ def main() -> None:
     ap.add_argument("--lr", type=float, default=5e-5)
     ap.add_argument("--epochs", type=int, default=2)
     ap.add_argument("--max_brain_len", type=int, default=None)
+    ap.add_argument("--max_text_len", type=int, default=512, help="Max decoder length (context+target)")
     ap.add_argument("--freeze_t5", action="store_true")
     ap.add_argument("--unfreeze_last_n", type=int, default=0)
     ap.add_argument("--tvb_aux_weight", type=float, default=0.1)
     ap.add_argument("--gradient_checkpointing", action="store_true")
     ap.add_argument("--bf16", action="store_true")
     ap.add_argument("--fp16", action="store_true")
+    ap.add_argument("--device", type=str, default=None)
+    ap.add_argument("--num_workers", type=int, default=0)
+    ap.add_argument("--cpu_threads", type=int, default=None, help="Cap torch CPU threads (helps on shared machines)")
+    ap.add_argument("--log_interval", type=int, default=200)
     ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
 
     set_seed(args.seed)
-    device = resolve_device(None)
+    if args.cpu_threads is not None:
+        try:
+            torch.set_num_threads(int(args.cpu_threads))
+            torch.set_num_interop_threads(int(args.cpu_threads))
+        except Exception:
+            pass
+        # best-effort caps for common BLAS/OpenMP backends
+        os.environ.setdefault("OMP_NUM_THREADS", str(args.cpu_threads))
+        os.environ.setdefault("MKL_NUM_THREADS", str(args.cpu_threads))
+        os.environ.setdefault("NUMEXPR_NUM_THREADS", str(args.cpu_threads))
+
+    device = resolve_device(args.device)
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     if args.mode == "tvb_pretrain":
         if args.tvb_dataset_path is None:
             raise SystemExit("tvb_dataset_path required")
         tvb_ds = TVBSequenceDataset(args.tvb_dataset_path)
-        loader = DataLoader(tvb_ds, batch_size=args.batch_size, shuffle=True, collate_fn=tvb_collate)
+        loader = DataLoader(
+            tvb_ds,
+            batch_size=args.batch_size,
+            shuffle=True,
+            collate_fn=tvb_collate,
+            num_workers=args.num_workers,
+        )
         # infer brain_dim
         sample = tvb_ds[0]["brain_seq"]
         brain_dim = sample.shape[1]
@@ -119,27 +142,55 @@ def main() -> None:
     model = model.to(device)
 
     optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr)
+    use_autocast = (device.type == "cuda") and (args.fp16 or args.bf16)
+    autocast_dtype = torch.float16 if args.fp16 else (torch.bfloat16 if args.bf16 else None)
+    scaler = torch.cuda.amp.GradScaler(enabled=(device.type == "cuda" and args.fp16))
+    aux_head = None
 
     def collate_fn(batch):
-        return meg_batch_collator(batch, pad_id=0)
+        return meg_batch_collator(batch, pad_id=0, max_decoder_len=args.max_text_len)
 
-    loader = DataLoader(meg_ds, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn)
+    loader = DataLoader(
+        meg_ds,
+        batch_size=args.batch_size,
+        shuffle=True,
+        collate_fn=collate_fn,
+        num_workers=args.num_workers,
+        pin_memory=(device.type == "cuda"),
+    )
 
     if args.mode == "meg_supervised":
         for epoch in range(1, args.epochs + 1):
             model.train()
             losses = []
-            for batch in loader:
+            running = 0.0
+            steps = 0
+            for step, batch in enumerate(loader, start=1):
                 brain_seq = batch["brain_seq"].to(device)
                 brain_mask = batch["brain_mask"].to(device)
                 dec_in = batch["decoder_input_ids"].to(device)
+                dec_attn = batch["decoder_attention_mask"].to(device)
                 labels = batch["labels"].to(device)
+                if args.max_brain_len is not None and brain_seq.size(1) > args.max_brain_len:
+                    brain_seq = brain_seq[:, : args.max_brain_len]
+                    brain_mask = brain_mask[:, : args.max_brain_len]
                 optimizer.zero_grad(set_to_none=True)
-                out = model(brain_seq, brain_mask, dec_in, labels=labels)
-                loss = out.loss
-                loss.backward()
-                optimizer.step()
+                with torch.autocast(device_type=device.type, dtype=autocast_dtype, enabled=use_autocast):
+                    out = model(brain_seq, brain_mask, dec_in, decoder_attention_mask=dec_attn, labels=labels)
+                    loss = out.loss
+                if scaler.is_enabled():
+                    scaler.scale(loss).backward()
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    loss.backward()
+                    optimizer.step()
+
                 losses.append(loss.item())
+                running += loss.item()
+                steps += 1
+                if args.log_interval and (step % args.log_interval == 0):
+                    log(f"epoch {epoch} step {step} loss={running/steps:.4f}")
             log(f"epoch {epoch} loss={sum(losses)/len(losses):.4f}")
         model.t5.save_pretrained(args.output_dir)
         torch.save(model.brain_encoder.state_dict(), args.output_dir / "brain_encoder.pt")
@@ -147,38 +198,66 @@ def main() -> None:
         return
 
     # joint
-    tvb_ds = TVBSequenceDataset(args.tvb_dataset_path) if args.tvb_dataset_path else None
-    tvb_loader = DataLoader(tvb_ds, batch_size=args.batch_size, shuffle=True, collate_fn=tvb_collate)
+    if args.tvb_dataset_path is None:
+        raise SystemExit("tvb_dataset_path required for meg_joint_optional")
+    tvb_ds = TVBSequenceDataset(args.tvb_dataset_path)
+    # Project brain-encoder hidden states back to brain_dim for auxiliary losses.
+    aux_head = nn.Linear(model.t5.config.d_model, brain_dim).to(device)
+    optimizer.add_param_group({"params": aux_head.parameters()})
+    tvb_loader = DataLoader(
+        tvb_ds,
+        batch_size=args.batch_size,
+        shuffle=True,
+        collate_fn=tvb_collate,
+        num_workers=args.num_workers,
+        pin_memory=(device.type == "cuda"),
+    )
     tvb_iter = iter(tvb_loader)
 
     for epoch in range(1, args.epochs + 1):
         model.train()
         losses = []
-        for batch in loader:
+        running = 0.0
+        steps = 0
+        for step, batch in enumerate(loader, start=1):
             brain_seq = batch["brain_seq"].to(device)
             brain_mask = batch["brain_mask"].to(device)
             dec_in = batch["decoder_input_ids"].to(device)
+            dec_attn = batch["decoder_attention_mask"].to(device)
             labels = batch["labels"].to(device)
+            if args.max_brain_len is not None and brain_seq.size(1) > args.max_brain_len:
+                brain_seq = brain_seq[:, : args.max_brain_len]
+                brain_mask = brain_mask[:, : args.max_brain_len]
             optimizer.zero_grad(set_to_none=True)
-            out = model(brain_seq, brain_mask, dec_in, labels=labels)
-            loss = out.loss
+            with torch.autocast(device_type=device.type, dtype=autocast_dtype, enabled=use_autocast):
+                out = model(brain_seq, brain_mask, dec_in, decoder_attention_mask=dec_attn, labels=labels)
+                loss = out.loss
             # tvb aux
-            if tvb_ds is not None:
-                try:
-                    tvb_batch = next(tvb_iter)
-                except StopIteration:
-                    tvb_iter = iter(tvb_loader)
-                    tvb_batch = next(tvb_iter)
-                tvb_seq = tvb_batch["brain_seq"].to(device)
-                tvb_mask = tvb_batch["brain_mask"].to(device)
-                tvb_tgt = tvb_batch["brain_target"].to(device)
-                pred = model.brain_encoder(tvb_seq, tvb_mask)
-                pred = pred[:, : tvb_tgt.shape[1]]
-                aux = masked_mse(pred, tvb_tgt, tvb_mask[:, : tvb_tgt.shape[1]])
-                loss = loss + args.tvb_aux_weight * aux
-            loss.backward()
-            optimizer.step()
+            try:
+                tvb_batch = next(tvb_iter)
+            except StopIteration:
+                tvb_iter = iter(tvb_loader)
+                tvb_batch = next(tvb_iter)
+            tvb_seq = tvb_batch["brain_seq"].to(device)
+            tvb_mask = tvb_batch["brain_mask"].to(device)
+            tvb_tgt = tvb_batch["brain_target"].to(device)
+            pred_h = model.brain_encoder(tvb_seq, tvb_mask)
+            pred = aux_head(pred_h)  # [B, T, brain_dim]
+            pred = pred[:, : tvb_tgt.shape[1]]
+            aux = masked_mse(pred, tvb_tgt, tvb_mask[:, : tvb_tgt.shape[1]])
+            loss = loss + args.tvb_aux_weight * aux
+            if scaler.is_enabled():
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                loss.backward()
+                optimizer.step()
             losses.append(loss.item())
+            running += loss.item()
+            steps += 1
+            if args.log_interval and (step % args.log_interval == 0):
+                log(f"epoch {epoch} step {step} loss={running/steps:.4f}")
         log(f"epoch {epoch} loss={sum(losses)/len(losses):.4f}")
 
     model.t5.save_pretrained(args.output_dir)

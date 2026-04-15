@@ -66,6 +66,7 @@ def main() -> None:
         brain_seq = collated["brain_seq"].to(device)
         brain_mask = collated["brain_mask"].to(device)
         dec_in = collated["decoder_input_ids"].to(device)
+        dec_attn = collated["decoder_attention_mask"].to(device)
 
         if args.max_brain_len is not None and brain_seq.size(1) > args.max_brain_len:
             brain_seq = brain_seq[:, : args.max_brain_len]
@@ -76,6 +77,7 @@ def main() -> None:
                 brain_seq,
                 brain_mask,
                 dec_in,
+                decoder_attention_mask=dec_attn,
                 labels=None,
                 output_attentions=True,
                 return_dict=True,

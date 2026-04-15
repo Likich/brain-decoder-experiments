@@ -19,10 +19,10 @@ env/
 *.swp
 
 # --- Outputs / artifacts (large or generated) ---
-outputs/
-models/
-runs/
-data/
+/outputs/
+/models/
+/runs/
+/data/
 brain.zip
 
 # --- Logs / temp ---

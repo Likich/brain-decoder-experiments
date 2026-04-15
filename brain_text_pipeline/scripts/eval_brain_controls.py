@@ -60,19 +60,20 @@ def main() -> None:
         brain_seq = collated["brain_seq"].to(device)
         brain_mask = collated["brain_mask"].to(device)
         dec_in = collated["decoder_input_ids"].to(device)
+        dec_attn = collated["decoder_attention_mask"].to(device)
         labels = collated["labels"].to(device)
 
         # REAL
-        out_real = model(brain_seq, brain_mask, dec_in, labels=labels)
+        out_real = model(brain_seq, brain_mask, dec_in, decoder_attention_mask=dec_attn, labels=labels)
         nll_real.append(out_real.loss.item())
 
         # ZERO
-        out_zero = model(torch.zeros_like(brain_seq), brain_mask, dec_in, labels=labels)
+        out_zero = model(torch.zeros_like(brain_seq), brain_mask, dec_in, decoder_attention_mask=dec_attn, labels=labels)
         nll_zero.append(out_zero.loss.item())
 
         # SHUF
         perm = torch.randperm(brain_seq.size(0))
-        out_shuf = model(brain_seq[perm], brain_mask, dec_in, labels=labels)
+        out_shuf = model(brain_seq[perm], brain_mask, dec_in, decoder_attention_mask=dec_attn, labels=labels)
         nll_shuf.append(out_shuf.loss.item())
 
         # JS on last token
