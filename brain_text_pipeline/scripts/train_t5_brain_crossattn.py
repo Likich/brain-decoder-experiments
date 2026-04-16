@@ -30,6 +30,21 @@ def resolve_device(arg: str | None) -> torch.device:
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
+def jsonable_args(args: argparse.Namespace) -> dict:
+    out = {}
+    for key, value in vars(args).items():
+        out[key] = str(value) if isinstance(value, Path) else value
+    return out
+
+
+def save_checkpoint(model: T5BrainModel, output_dir: Path, args: argparse.Namespace, step: int | None = None) -> None:
+    save_dir = output_dir if step is None else output_dir / f"checkpoint-step-{step}"
+    save_dir.mkdir(parents=True, exist_ok=True)
+    model.t5.save_pretrained(save_dir)
+    torch.save(model.brain_encoder.state_dict(), save_dir / "brain_encoder.pt")
+    write_manifest(save_dir / "config.json", jsonable_args(args))
+
+
 class BrainPretrainHead(nn.Module):
     def __init__(self, brain_encoder: nn.Module, d_model: int, brain_dim: int):
         super().__init__()
@@ -71,6 +86,8 @@ def main() -> None:
     ap.add_argument("--num_workers", type=int, default=0)
     ap.add_argument("--cpu_threads", type=int, default=None, help="Cap torch CPU threads (helps on shared machines)")
     ap.add_argument("--log_interval", type=int, default=200)
+    ap.add_argument("--max_steps", type=int, default=None, help="Stop after this many optimizer steps")
+    ap.add_argument("--save_every_steps", type=int, default=0, help="Write checkpoint-step-N every N steps")
     ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
 
@@ -121,7 +138,7 @@ def main() -> None:
                 losses.append(loss.item())
             log(f"epoch {epoch} loss={sum(losses)/len(losses):.4f}")
         torch.save(pretrain.encoder.state_dict(), args.output_dir / "brain_encoder.pt")
-        write_manifest(args.output_dir / "config.json", vars(args))
+        write_manifest(args.output_dir / "config.json", jsonable_args(args))
         return
 
     # MEG supervised / joint
@@ -144,7 +161,7 @@ def main() -> None:
     optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr)
     use_autocast = (device.type == "cuda") and (args.fp16 or args.bf16)
     autocast_dtype = torch.float16 if args.fp16 else (torch.bfloat16 if args.bf16 else None)
-    scaler = torch.cuda.amp.GradScaler(enabled=(device.type == "cuda" and args.fp16))
+    scaler = torch.amp.GradScaler("cuda", enabled=(device.type == "cuda" and args.fp16))
     aux_head = None
 
     def collate_fn(batch):
@@ -160,6 +177,7 @@ def main() -> None:
     )
 
     if args.mode == "meg_supervised":
+        global_step = 0
         for epoch in range(1, args.epochs + 1):
             model.train()
             losses = []
@@ -189,12 +207,18 @@ def main() -> None:
                 losses.append(loss.item())
                 running += loss.item()
                 steps += 1
+                global_step += 1
                 if args.log_interval and (step % args.log_interval == 0):
                     log(f"epoch {epoch} step {step} loss={running/steps:.4f}")
+                if args.save_every_steps and global_step % args.save_every_steps == 0:
+                    save_checkpoint(model, args.output_dir, args, step=global_step)
+                    log(f"saved checkpoint at global_step={global_step}")
+                if args.max_steps is not None and global_step >= args.max_steps:
+                    log(f"stopping at max_steps={args.max_steps}")
+                    save_checkpoint(model, args.output_dir, args)
+                    return
             log(f"epoch {epoch} loss={sum(losses)/len(losses):.4f}")
-        model.t5.save_pretrained(args.output_dir)
-        torch.save(model.brain_encoder.state_dict(), args.output_dir / "brain_encoder.pt")
-        write_manifest(args.output_dir / "config.json", vars(args))
+        save_checkpoint(model, args.output_dir, args)
         return
 
     # joint
@@ -214,6 +238,7 @@ def main() -> None:
     )
     tvb_iter = iter(tvb_loader)
 
+    global_step = 0
     for epoch in range(1, args.epochs + 1):
         model.train()
         losses = []
@@ -256,13 +281,19 @@ def main() -> None:
             losses.append(loss.item())
             running += loss.item()
             steps += 1
+            global_step += 1
             if args.log_interval and (step % args.log_interval == 0):
                 log(f"epoch {epoch} step {step} loss={running/steps:.4f}")
+            if args.save_every_steps and global_step % args.save_every_steps == 0:
+                save_checkpoint(model, args.output_dir, args, step=global_step)
+                log(f"saved checkpoint at global_step={global_step}")
+            if args.max_steps is not None and global_step >= args.max_steps:
+                log(f"stopping at max_steps={args.max_steps}")
+                save_checkpoint(model, args.output_dir, args)
+                return
         log(f"epoch {epoch} loss={sum(losses)/len(losses):.4f}")
 
-    model.t5.save_pretrained(args.output_dir)
-    torch.save(model.brain_encoder.state_dict(), args.output_dir / "brain_encoder.pt")
-    write_manifest(args.output_dir / "config.json", vars(args))
+    save_checkpoint(model, args.output_dir, args)
 
 
 if __name__ == "__main__":
