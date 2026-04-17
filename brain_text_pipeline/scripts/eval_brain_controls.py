@@ -35,6 +35,8 @@ def main() -> None:
     ap.add_argument("--samples", type=int, default=2000)
     ap.add_argument("--batch_size", type=int, default=8)
     ap.add_argument("--device", type=str, default=None)
+    ap.add_argument("--max_text_len", type=int, default=None)
+    ap.add_argument("--max_brain_len", type=int, default=None)
     ap.add_argument("--out_json", type=Path, default=Path("eval_controls.json"))
     args = ap.parse_args()
 
@@ -53,15 +55,19 @@ def main() -> None:
 
     js_real, js_shuf = [], []
     nll_real, nll_zero, nll_shuf = [], [], []
+    top1_real_zero, top1_shuf_zero = [], []
 
     for i in range(0, len(idxs), args.batch_size):
         batch = [ds[j] for j in idxs[i : i + args.batch_size]]
-        collated = meg_batch_collator(batch, pad_id=0)
+        collated = meg_batch_collator(batch, pad_id=0, max_decoder_len=args.max_text_len)
         brain_seq = collated["brain_seq"].to(device)
         brain_mask = collated["brain_mask"].to(device)
         dec_in = collated["decoder_input_ids"].to(device)
         dec_attn = collated["decoder_attention_mask"].to(device)
         labels = collated["labels"].to(device)
+        if args.max_brain_len is not None and brain_seq.size(1) > args.max_brain_len:
+            brain_seq = brain_seq[:, : args.max_brain_len]
+            brain_mask = brain_mask[:, : args.max_brain_len]
 
         # REAL
         out_real = model(brain_seq, brain_mask, dec_in, decoder_attention_mask=dec_attn, labels=labels)
@@ -83,16 +89,23 @@ def main() -> None:
             logits_shuf = out_shuf.logits[:, -1, :].softmax(dim=-1)
             js_real.append(js_div(logits_real, logits_zero).mean().item())
             js_shuf.append(js_div(logits_shuf, logits_zero).mean().item())
+            top1_real_zero.append((logits_real.argmax(dim=-1) == logits_zero.argmax(dim=-1)).float().mean().item())
+            top1_shuf_zero.append((logits_shuf.argmax(dim=-1) == logits_zero.argmax(dim=-1)).float().mean().item())
 
     result = {
         "n": len(idxs),
         "nll_real": float(np.mean(nll_real)),
+        "nll_real_median": float(np.median(nll_real)),
         "nll_zero": float(np.mean(nll_zero)),
+        "nll_zero_median": float(np.median(nll_zero)),
         "nll_shuf": float(np.mean(nll_shuf)),
+        "nll_shuf_median": float(np.median(nll_shuf)),
         "delta_real_zero": float(np.mean(nll_real) - np.mean(nll_zero)),
         "delta_real_shuf": float(np.mean(nll_real) - np.mean(nll_shuf)),
         "js_real": float(np.mean(js_real)),
         "js_shuf": float(np.mean(js_shuf)),
+        "top1_real_zero": float(np.mean(top1_real_zero)),
+        "top1_shuf_zero": float(np.mean(top1_shuf_zero)),
     }
     log(str(result))
     save_json(args.out_json, result)
