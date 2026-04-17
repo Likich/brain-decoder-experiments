@@ -37,6 +37,9 @@ def main() -> None:
         help="Max encoder tokens; defaults to tokenizer.model_max_length if reasonable",
     )
     ap.add_argument("--max_examples", type=int, default=None)
+    ap.add_argument("--max_target_tokens", type=int, default=8, help="Skip/truncate target words longer than this many tokens")
+    ap.add_argument("--max_target_chars", type=int, default=80, help="Skip implausibly long word entries")
+    ap.add_argument("--allow_multiword_targets", action="store_true", help="Keep targets containing whitespace")
     ap.add_argument("--tmin", type=float, default=-0.5, help="seconds before word onset")
     ap.add_argument("--tmax", type=float, default=0.0, help="seconds before word onset")
     ap.add_argument("--word_column", type=str, default="word", help="events.tsv column for word")
@@ -64,6 +67,9 @@ def main() -> None:
     subjects = [args.subject] if args.subject else sorted([p.name for p in args.preprocessed_root.glob("sub-*")])
 
     total = 0
+    skipped_empty = 0
+    skipped_long_target = 0
+    skipped_bad_window = 0
     for sub in subjects:
         sessions = [args.session] if args.session else sorted([p.name for p in (args.preprocessed_root / sub).glob("ses-*")])
         for ses in sessions:
@@ -97,7 +103,7 @@ def main() -> None:
                 onsets = []
                 if df is not None and args.word_column in df.columns:
                     for _, row in df.iterrows():
-                        word = str(row[args.word_column])
+                        word = str(row[args.word_column]).strip()
                         onset = float(row.get("onset", row.get("onset_sec", 0.0)))
                         if word.strip() == "" or word == "nan":
                             continue
@@ -107,7 +113,7 @@ def main() -> None:
                     # fallback to trial_type column
                     if df is not None and "trial_type" in df.columns:
                         for _, row in df.iterrows():
-                            word = str(row["trial_type"])
+                            word = str(row["trial_type"]).strip()
                             onset = float(row.get("onset", row.get("onset_sec", 0.0)))
                             words.append(word)
                             onsets.append(onset)
@@ -116,6 +122,12 @@ def main() -> None:
                         continue
 
                 for i, (word, onset) in enumerate(zip(words, onsets)):
+                    if not word or word == "nan":
+                        skipped_empty += 1
+                        continue
+                    if (not args.allow_multiword_targets and len(word.split()) > 1) or len(word) > args.max_target_chars:
+                        skipped_long_target += 1
+                        continue
                     ctx_words = words[max(0, i - args.max_context_words) : i]
                     ctx_text = " ".join(ctx_words)
                     ctx_ids = tokenizer(
@@ -124,15 +136,28 @@ def main() -> None:
                         truncation=True,
                         max_length=max_ctx_tokens,
                     ).input_ids
-                    tgt_ids = tokenizer.encode(word, add_special_tokens=False)
+                    tgt_ids = tokenizer(
+                        word,
+                        add_special_tokens=False,
+                        truncation=True,
+                        max_length=args.max_target_tokens,
+                    ).input_ids
                     if len(tgt_ids) == 0:
+                        skipped_empty += 1
                         continue
 
                     start = int((onset + args.tmin) * sfreq)
                     stop = int((onset + args.tmax) * sfreq)
                     start = max(start, 0)
                     stop = max(stop, start + 1)
+                    if start >= brain.shape[0]:
+                        skipped_bad_window += 1
+                        continue
+                    stop = min(stop, brain.shape[0])
                     brain_seq = brain[start:stop]
+                    if brain_seq.shape[0] == 0:
+                        skipped_bad_window += 1
+                        continue
 
                     item = {
                         "input_ids_context": np.array(ctx_ids, dtype=np.int32),
@@ -168,9 +193,19 @@ def main() -> None:
         "tmax": args.tmax,
         "max_context_words": args.max_context_words,
         "max_context_tokens": max_ctx_tokens,
+        "max_target_tokens": args.max_target_tokens,
+        "max_target_chars": args.max_target_chars,
+        "allow_multiword_targets": args.allow_multiword_targets,
+        "skipped_empty": skipped_empty,
+        "skipped_long_target": skipped_long_target,
+        "skipped_bad_window": skipped_bad_window,
     })
     write_manifest(args.out_dir / "manifest.json", manifest)
-    log(f"Saved {total} examples to {args.out_dir}")
+    log(
+        f"Saved {total} examples to {args.out_dir} "
+        f"(skipped_empty={skipped_empty}, skipped_long_target={skipped_long_target}, "
+        f"skipped_bad_window={skipped_bad_window})"
+    )
 
 
 if __name__ == "__main__":
