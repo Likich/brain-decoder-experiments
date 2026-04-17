@@ -42,6 +42,12 @@ def main() -> None:
     ap.add_argument("--device", type=str, default=None)
     ap.add_argument("--shard_size", type=int, default=200)
     ap.add_argument("--max_brain_len", type=int, default=None)
+    ap.add_argument("--max_text_len", type=int, default=None)
+    ap.add_argument(
+        "--decoder_context_mode",
+        choices=["context_target", "target_only"],
+        default="context_target",
+    )
     ap.add_argument("--save_full_matrix", action="store_true", help="Save full [tgt_len, src_len] attention")
     args = ap.parse_args()
 
@@ -62,7 +68,12 @@ def main() -> None:
 
     for i in range(0, len(idxs), args.batch_size):
         batch = [ds[j] for j in idxs[i : i + args.batch_size]]
-        collated = meg_batch_collator(batch, pad_id=0)
+        collated = meg_batch_collator(
+            batch,
+            pad_id=0,
+            max_decoder_len=args.max_text_len,
+            decoder_context_mode=args.decoder_context_mode,
+        )
         brain_seq = collated["brain_seq"].to(device)
         brain_mask = collated["brain_mask"].to(device)
         dec_in = collated["decoder_input_ids"].to(device)

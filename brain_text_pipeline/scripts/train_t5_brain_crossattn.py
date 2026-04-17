@@ -76,6 +76,12 @@ def main() -> None:
     ap.add_argument("--epochs", type=int, default=2)
     ap.add_argument("--max_brain_len", type=int, default=None)
     ap.add_argument("--max_text_len", type=int, default=512, help="Max decoder length (context+target)")
+    ap.add_argument(
+        "--decoder_context_mode",
+        choices=["context_target", "target_only"],
+        default="context_target",
+        help="Use context+target teacher forcing or predict target from brain only",
+    )
     ap.add_argument("--freeze_t5", action="store_true")
     ap.add_argument("--unfreeze_last_n", type=int, default=0)
     ap.add_argument("--tvb_aux_weight", type=float, default=0.1)
@@ -165,7 +171,12 @@ def main() -> None:
     aux_head = None
 
     def collate_fn(batch):
-        return meg_batch_collator(batch, pad_id=0, max_decoder_len=args.max_text_len)
+        return meg_batch_collator(
+            batch,
+            pad_id=0,
+            max_decoder_len=args.max_text_len,
+            decoder_context_mode=args.decoder_context_mode,
+        )
 
     loader = DataLoader(
         meg_ds,
