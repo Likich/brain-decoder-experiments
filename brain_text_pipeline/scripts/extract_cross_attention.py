@@ -48,7 +48,19 @@ def main() -> None:
         choices=["context_target", "target_only"],
         default="context_target",
     )
+    ap.add_argument(
+        "--brain_norm",
+        choices=["none", "per_example"],
+        default="none",
+        help="Normalize each brain window before attention extraction",
+    )
     ap.add_argument("--save_full_matrix", action="store_true", help="Save full [tgt_len, src_len] attention")
+    ap.add_argument(
+        "--condition",
+        choices=["real", "zero", "shuf"],
+        default="real",
+        help="Which brain condition to export attention for",
+    )
     args = ap.parse_args()
 
     device = resolve_device(args.device)
@@ -73,6 +85,7 @@ def main() -> None:
             pad_id=0,
             max_decoder_len=args.max_text_len,
             decoder_context_mode=args.decoder_context_mode,
+            brain_norm=args.brain_norm,
         )
         brain_seq = collated["brain_seq"].to(device)
         brain_mask = collated["brain_mask"].to(device)
@@ -83,10 +96,20 @@ def main() -> None:
             brain_seq = brain_seq[:, : args.max_brain_len]
             brain_mask = brain_mask[:, : args.max_brain_len]
 
+        if args.condition == "zero":
+            brain_cond = torch.zeros_like(brain_seq)
+            mask_cond = brain_mask
+        elif args.condition == "shuf":
+            brain_cond = torch.roll(brain_seq, shifts=1, dims=0)
+            mask_cond = torch.roll(brain_mask, shifts=1, dims=0)
+        else:
+            brain_cond = brain_seq
+            mask_cond = brain_mask
+
         with torch.no_grad():
             out = model(
-                brain_seq,
-                brain_mask,
+                brain_cond,
+                mask_cond,
                 dec_in,
                 decoder_attention_mask=dec_attn,
                 labels=None,
@@ -110,7 +133,7 @@ def main() -> None:
                     pass
             item = {
                 "attn_last": last[b_idx].astype(np.float32),
-                "brain_mask": collated["brain_mask"][b_idx].cpu().numpy().astype(np.int32),
+                "brain_mask": mask_cond[b_idx].cpu().numpy().astype(np.int32),
                 "meta": json.dumps(meta) if meta is not None else "{}",
             }
             if full is not None:
@@ -123,6 +146,8 @@ def main() -> None:
         "model_name_or_path": args.model_name_or_path,
         "brain_encoder_ckpt": str(args.brain_encoder_ckpt),
         "max_brain_len": args.max_brain_len,
+        "brain_norm": args.brain_norm,
+        "condition": args.condition,
     })
     write_manifest(args.out_dir / "manifest.json", manifest)
     log(f"Saved attention shards to {args.out_dir}")
