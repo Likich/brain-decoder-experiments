@@ -6,6 +6,7 @@ Requires preprocessed brain.npy from preprocess_meg_masc.py.
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import sys
 from pathlib import Path
@@ -20,6 +21,21 @@ if str(ROOT) not in sys.path:
 from brain_text_pipeline.src.data.meg_masc import events_path
 from brain_text_pipeline.src.utils.io import ShardWriter, write_manifest
 from brain_text_pipeline.src.utils.logging import log
+
+
+def parse_trial_type(value: object) -> dict:
+    if isinstance(value, dict):
+        return value
+    if value is None:
+        return {}
+    text = str(value)
+    if text == "" or text == "nan":
+        return {}
+    try:
+        parsed = ast.literal_eval(text)
+    except (SyntaxError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def main() -> None:
@@ -91,16 +107,16 @@ def main() -> None:
                 if not events_file.exists():
                     log(f"Missing events {events_file}")
                     continue
-                events = np.loadtxt(events_file, delimiter="\t", dtype=str, skiprows=1)
-                # fallback: use pandas if needed
                 try:
                     import pandas as pd
+
                     df = pd.read_csv(events_file, sep="\t")
                 except Exception:
                     df = None
 
                 words = []
                 onsets = []
+                event_metas = []
                 if df is not None and args.word_column in df.columns:
                     for _, row in df.iterrows():
                         word = str(row[args.word_column]).strip()
@@ -109,19 +125,26 @@ def main() -> None:
                             continue
                         words.append(word)
                         onsets.append(onset)
+                        event_metas.append({})
                 else:
-                    # fallback to trial_type column
+                    # MEG-MASC stores word metadata as a dict-like string in trial_type.
                     if df is not None and "trial_type" in df.columns:
                         for _, row in df.iterrows():
-                            word = str(row["trial_type"]).strip()
+                            event_meta = parse_trial_type(row["trial_type"])
+                            if event_meta.get("kind") != "word":
+                                continue
+                            word = str(event_meta.get("word", "")).strip()
                             onset = float(row.get("onset", row.get("onset_sec", 0.0)))
+                            if word == "" or word == "nan":
+                                continue
                             words.append(word)
                             onsets.append(onset)
+                            event_metas.append(event_meta)
                     else:
                         log(f"No word column in {events_file}, skipping")
                         continue
 
-                for i, (word, onset) in enumerate(zip(words, onsets)):
+                for i, (word, onset, event_meta) in enumerate(zip(words, onsets, event_metas)):
                     if not word or word == "nan":
                         skipped_empty += 1
                         continue
@@ -136,14 +159,12 @@ def main() -> None:
                         truncation=True,
                         max_length=max_ctx_tokens,
                     ).input_ids
-                    tgt_ids = tokenizer(
-                        word,
-                        add_special_tokens=False,
-                        truncation=True,
-                        max_length=args.max_target_tokens,
-                    ).input_ids
+                    tgt_ids = tokenizer(word, add_special_tokens=False, truncation=False).input_ids
                     if len(tgt_ids) == 0:
                         skipped_empty += 1
+                        continue
+                    if len(tgt_ids) > args.max_target_tokens:
+                        skipped_long_target += 1
                         continue
 
                     start = int((onset + args.tmin) * sfreq)
@@ -172,6 +193,10 @@ def main() -> None:
                                 "task": task,
                                 "onset_sec": float(onset),
                                 "target_text": word,
+                                "story": event_meta.get("story"),
+                                "sound": event_meta.get("sound"),
+                                "word_index": event_meta.get("word_index"),
+                                "sequence_id": event_meta.get("sequence_id"),
                             }
                         ),
                     }

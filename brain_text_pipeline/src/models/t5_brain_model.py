@@ -78,3 +78,22 @@ class T5BrainModel(nn.Module):
         if hasattr(self.t5, "lm_head"):
             for p in self.t5.lm_head.parameters():
                 p.requires_grad = True
+
+    def unfreeze_decoder_cross_attention(self, last_n: int = 0) -> None:
+        """Unfreeze only decoder encoder-decoder attention blocks.
+
+        This is useful for brain-conditioned decoding: the language model and
+        LM head stay fixed, while cross-attention learns how to read the
+        brain-derived encoder states.
+        """
+        blocks = self.t5.decoder.block
+        if last_n and last_n > 0:
+            blocks = blocks[-last_n:]
+        for block in blocks:
+            # T5 decoder block layout:
+            # layer[0] = self-attention, layer[1] = encoder-decoder attention,
+            # layer[2] = feed-forward.
+            if len(block.layer) < 2:
+                continue
+            for p in block.layer[1].parameters():
+                p.requires_grad = True

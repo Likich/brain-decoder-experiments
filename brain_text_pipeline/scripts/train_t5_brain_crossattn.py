@@ -45,6 +45,12 @@ def save_checkpoint(model: T5BrainModel, output_dir: Path, args: argparse.Namesp
     write_manifest(save_dir / "config.json", jsonable_args(args))
 
 
+def parameter_counts(model: nn.Module) -> tuple[int, int]:
+    total = sum(p.numel() for p in model.parameters())
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    return total, trainable
+
+
 class BrainPretrainHead(nn.Module):
     def __init__(self, brain_encoder: nn.Module, d_model: int, brain_dim: int):
         super().__init__()
@@ -82,8 +88,25 @@ def main() -> None:
         default="context_target",
         help="Use context+target teacher forcing or predict target from brain only",
     )
+    ap.add_argument(
+        "--brain_norm",
+        choices=["none", "per_example"],
+        default="none",
+        help="Normalize each brain window before the encoder",
+    )
     ap.add_argument("--freeze_t5", action="store_true")
     ap.add_argument("--unfreeze_last_n", type=int, default=0)
+    ap.add_argument(
+        "--unfreeze_cross_attn",
+        action="store_true",
+        help="After freezing T5, unfreeze only decoder encoder-decoder attention modules",
+    )
+    ap.add_argument(
+        "--cross_attn_last_n",
+        type=int,
+        default=0,
+        help="With --unfreeze_cross_attn, restrict to the last N decoder blocks; 0 means all",
+    )
     ap.add_argument("--tvb_aux_weight", type=float, default=0.1)
     ap.add_argument("--gradient_checkpointing", action="store_true")
     ap.add_argument("--bf16", action="store_true")
@@ -160,9 +183,14 @@ def main() -> None:
         model.freeze_t5()
     if args.unfreeze_last_n:
         model.unfreeze_last_n(args.unfreeze_last_n)
+    if args.unfreeze_cross_attn:
+        model.unfreeze_decoder_cross_attention(args.cross_attn_last_n)
     if args.gradient_checkpointing:
         model.t5.gradient_checkpointing_enable()
     model = model.to(device)
+
+    total_params, trainable_params = parameter_counts(model)
+    log(f"trainable parameters: {trainable_params:,}/{total_params:,} ({100 * trainable_params / total_params:.2f}%)")
 
     optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr)
     use_autocast = (device.type == "cuda") and (args.fp16 or args.bf16)
@@ -176,6 +204,7 @@ def main() -> None:
             pad_id=0,
             max_decoder_len=args.max_text_len,
             decoder_context_mode=args.decoder_context_mode,
+            brain_norm=args.brain_norm,
         )
 
     loader = DataLoader(

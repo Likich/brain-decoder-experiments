@@ -53,6 +53,21 @@ def pad_labels(seqs: List[np.ndarray], pad_value: int = -100, dtype=torch.long) 
     return out
 
 
+def normalize_brain_batch(brain_seq: torch.Tensor, brain_mask: torch.Tensor, mode: str) -> torch.Tensor:
+    if mode == "none":
+        return brain_seq
+    if mode != "per_example":
+        raise ValueError(f"unknown brain_norm: {mode}")
+
+    mask = brain_mask.to(dtype=brain_seq.dtype).unsqueeze(-1)
+    denom = mask.sum(dim=1, keepdim=True).clamp_min(1.0)
+    mean = (brain_seq * mask).sum(dim=1, keepdim=True) / denom
+    centered = (brain_seq - mean) * mask
+    var = (centered * centered).sum(dim=1, keepdim=True) / denom
+    std = var.sqrt().clamp_min(1e-6)
+    return centered / std
+
+
 def meg_batch_collator(
     batch: List[Dict[str, Any]],
     pad_id: int,
@@ -60,9 +75,11 @@ def meg_batch_collator(
     decoder_start_id: int | None = None,
     max_decoder_len: int | None = None,
     decoder_context_mode: str = "context_target",
+    brain_norm: str = "none",
 ) -> Dict[str, torch.Tensor]:
     brain_seqs = [b["brain_seq"] for b in batch]
     brain_seq, brain_mask = pad_sequence(brain_seqs, pad_value=0.0, dtype=torch.float32)
+    brain_seq = normalize_brain_batch(brain_seq, brain_mask, brain_norm)
 
     context_ids = [b["input_ids_context"] for b in batch]
     decoder_targets = [b["decoder_target_ids"] for b in batch]

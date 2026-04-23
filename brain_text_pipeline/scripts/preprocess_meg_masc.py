@@ -81,7 +81,11 @@ def main() -> None:
                 data = raw.get_data().T.astype(np.float32)
                 if args.zscore:
                     mean = data.mean(axis=0, keepdims=True)
-                    std = data.std(axis=0, keepdims=True) + 1e-6
+                    std = data.std(axis=0, keepdims=True)
+                    # MEG values are stored in physical units and can have very
+                    # small standard deviations. Adding a generic 1e-6 epsilon
+                    # would collapse normalized values toward zero.
+                    std = np.where(std < 1e-20, 1.0, std)
                     data = (data - mean) / std
                 else:
                     mean = None
