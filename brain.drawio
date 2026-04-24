@@ -1,6 +1,6 @@
 <mxfile host="app.diagrams.net">
   <diagram name="Page-1" id="g0kpaUJMSLxdcqF6q6GO">
-    <mxGraphModel dx="958" dy="602" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="1" shadow="0">
+    <mxGraphModel dx="1118" dy="702" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="1" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
@@ -19,23 +19,23 @@
         <mxCell id="3hbMaKPvaGfP9RUHzSH0-5" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="" vertex="1">
           <mxGeometry height="310" width="300" x="530" y="420" as="geometry" />
         </mxCell>
-        <mxCell id="uc7b5UVpd8qzJGzJCXFV-1" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="Data regimes (two sources)" vertex="1">
+        <mxCell id="uc7b5UVpd8qzJGzJCXFV-1" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;strokeWidth=2;fontSize=13;fontStyle=1" value="Data regimes (two sources)" vertex="1">
           <mxGeometry height="30" width="180" x="50" y="390" as="geometry" />
         </mxCell>
-        <mxCell id="uc7b5UVpd8qzJGzJCXFV-2" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="Common conditioning model" vertex="1">
-          <mxGeometry height="30" width="180" x="300" y="390" as="geometry" />
+        <mxCell id="uc7b5UVpd8qzJGzJCXFV-2" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;strokeWidth=2;fontSize=13;fontStyle=1" value="Common conditioning model" vertex="1">
+          <mxGeometry height="30" width="200" x="290" y="390" as="geometry" />
         </mxCell>
-        <mxCell id="uc7b5UVpd8qzJGzJCXFV-3" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="Paired-control evaluation" vertex="1">
+        <mxCell id="uc7b5UVpd8qzJGzJCXFV-3" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;strokeWidth=2;fontSize=13;fontStyle=1" value="Paired-control evaluation" vertex="1">
           <mxGeometry height="30" width="180" x="590" y="390" as="geometry" />
         </mxCell>
         <mxCell id="uc7b5UVpd8qzJGzJCXFV-4" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="A. Mechanism (synthetic TVB)" vertex="1">
-          <mxGeometry height="30" width="200" x="35" y="430" as="geometry" />
+          <mxGeometry height="30" width="200" x="35" y="420" as="geometry" />
         </mxCell>
         <mxCell id="uc7b5UVpd8qzJGzJCXFV-5" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="Synthetic TVB state&lt;div&gt;$$z \in \mathbb{R}^{d}$$&lt;/div&gt;" vertex="1">
           <mxGeometry height="30" width="200" x="35" y="470" as="geometry" />
         </mxCell>
         <mxCell id="uc7b5UVpd8qzJGzJCXFV-6" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="B. Held-out validation (real MEG)" vertex="1">
-          <mxGeometry height="30" width="200" x="40" y="590" as="geometry" />
+          <mxGeometry height="40" width="200" x="40" y="580" as="geometry" />
         </mxCell>
         <mxCell id="uc7b5UVpd8qzJGzJCXFV-7" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="Post-word MEG window&lt;div&gt;$$B_{1:T} \in \mathbb{R}^{T \times C}$$&lt;/div&gt;" vertex="1">
           <mxGeometry height="30" width="200" x="40" y="630" as="geometry" />
