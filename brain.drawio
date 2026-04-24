@@ -1,6 +1,6 @@
 <mxfile host="app.diagrams.net">
   <diagram name="Page-1" id="g0kpaUJMSLxdcqF6q6GO">
-    <mxGraphModel dx="1006" dy="632" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="1" shadow="0">
+    <mxGraphModel dx="805" dy="506" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="1" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
@@ -10,8 +10,8 @@
         <mxCell id="uc7b5UVpd8qzJGzJCXFV-1" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;strokeWidth=2;fontSize=12;fontStyle=1;fontFamily=Times New Roman;" value="&lt;font style=&quot;font-size: 15px; color: rgb(116, 69, 168);&quot;&gt;Data regimes (two sources)&lt;/font&gt;" vertex="1">
           <mxGeometry height="30" width="180" x="50" y="390" as="geometry" />
         </mxCell>
-        <mxCell id="uc7b5UVpd8qzJGzJCXFV-2" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;strokeWidth=2;fontSize=12;fontStyle=1;fontFamily=Times New Roman;" value="&lt;font style=&quot;color: light-dark(rgb(252, 117, 190), rgb(237, 237, 237));&quot;&gt;Shared model&lt;/font&gt;" vertex="1">
-          <mxGeometry height="30" width="200" x="294" y="397" as="geometry" />
+        <mxCell id="uc7b5UVpd8qzJGzJCXFV-2" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;strokeWidth=2;fontSize=12;fontStyle=1;fontFamily=Times New Roman;" value="&lt;font style=&quot;color: light-dark(rgb(116, 69, 168), rgb(237, 237, 237)); font-size: 15px;&quot;&gt;Shared model&lt;/font&gt;" vertex="1">
+          <mxGeometry height="30" width="200" x="294" y="390" as="geometry" />
         </mxCell>
         <mxCell id="uc7b5UVpd8qzJGzJCXFV-3" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;strokeWidth=2;fontSize=13;fontStyle=1" value="Paired-control evaluation" vertex="1">
           <mxGeometry height="30" width="180" x="590" y="390" as="geometry" />
@@ -49,18 +49,17 @@
         <mxCell id="uc7b5UVpd8qzJGzJCXFV-20" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;strokeWidth=2;fontSize=10;fontStyle=1;fontFamily=Times New Roman;" value="Temporal brain encoder" vertex="1">
           <mxGeometry height="30" width="118" x="274" y="425" as="geometry" />
         </mxCell>
-        <mxCell id="uc7b5UVpd8qzJGzJCXFV-21" edge="1" parent="1" style="endArrow=classic;html=1;rounded=0;edgeStyle=orthogonalEdgeStyle;" value="">
+        <mxCell id="uc7b5UVpd8qzJGzJCXFV-21" edge="1" parent="1" style="endArrow=blockThin;html=1;rounded=0;edgeStyle=orthogonalEdgeStyle;strokeWidth=0.5;endFill=0;" value="">
           <mxGeometry height="50" relative="1" width="50" as="geometry">
             <Array as="points">
               <mxPoint x="259" y="657" />
               <mxPoint x="259" y="594" />
-              <mxPoint x="289" y="594" />
             </Array>
             <mxPoint x="199.99999999999994" y="656.6999999999999" as="sourcePoint" />
-            <mxPoint x="290" y="594" as="targetPoint" />
+            <mxPoint x="287" y="594" as="targetPoint" />
           </mxGeometry>
         </mxCell>
-        <mxCell id="uc7b5UVpd8qzJGzJCXFV-22" edge="1" parent="1" style="endArrow=classic;html=1;rounded=0;" value="">
+        <mxCell id="uc7b5UVpd8qzJGzJCXFV-22" edge="1" parent="1" style="endArrow=blockThin;html=1;rounded=0;strokeWidth=0.5;endFill=0;" value="">
           <mxGeometry height="50" relative="1" width="50" as="geometry">
             <mxPoint x="186.67" y="553" as="sourcePoint" />
             <mxPoint x="286.67" y="553" as="targetPoint" />
