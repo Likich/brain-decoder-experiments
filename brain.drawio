@@ -34,6 +34,12 @@
         <mxCell id="uc7b5UVpd8qzJGzJCXFV-5" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="Synthetic TVB state&lt;div&gt;$$z \in \mathbb{R}^{d}$$&lt;/div&gt;" vertex="1">
           <mxGeometry height="30" width="200" x="35" y="470" as="geometry" />
         </mxCell>
+        <mxCell id="uc7b5UVpd8qzJGzJCXFV-6" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="B. Held-out validation (real MEG)" vertex="1">
+          <mxGeometry height="30" width="200" x="40" y="590" as="geometry" />
+        </mxCell>
+        <mxCell id="uc7b5UVpd8qzJGzJCXFV-7" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="Post-word MEG window&lt;div&gt;$$B_{1:T} \in \mathbb{R}^{T \times C}$$&lt;/div&gt;" vertex="1">
+          <mxGeometry height="30" width="200" x="40" y="630" as="geometry" />
+        </mxCell>
       </root>
     </mxGraphModel>
   </diagram>
