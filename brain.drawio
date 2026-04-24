@@ -11,7 +11,7 @@
           <mxGeometry height="30" width="180" x="50" y="390" as="geometry" />
         </mxCell>
         <mxCell id="uc7b5UVpd8qzJGzJCXFV-2" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;strokeWidth=2;fontSize=12;fontStyle=1;fontFamily=Times New Roman;" value="&lt;font style=&quot;color: light-dark(rgb(252, 117, 190), rgb(237, 237, 237));&quot;&gt;Shared model&lt;/font&gt;" vertex="1">
-          <mxGeometry height="30" width="200" x="265.31" y="400" as="geometry" />
+          <mxGeometry height="30" width="200" x="294" y="397" as="geometry" />
         </mxCell>
         <mxCell id="uc7b5UVpd8qzJGzJCXFV-3" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;strokeWidth=2;fontSize=13;fontStyle=1" value="Paired-control evaluation" vertex="1">
           <mxGeometry height="30" width="180" x="590" y="390" as="geometry" />
@@ -75,8 +75,8 @@
         <mxCell id="uc7b5UVpd8qzJGzJCXFV-28" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;strokeWidth=2;fontSize=10;fontStyle=1;fontFamily=Times New Roman;" value="Cross attention" vertex="1">
           <mxGeometry height="30" width="118" x="395.63" y="425" as="geometry" />
         </mxCell>
-        <mxCell id="uc7b5UVpd8qzJGzJCXFV-29" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;strokeWidth=2;fontSize=10;fontStyle=1;fontFamily=Times New Roman;" value="&lt;span style=&quot;font-weight: normal;&quot;&gt;Brain signal conditions target-token prediction via cross-attention&lt;/span&gt;" vertex="1">
-          <mxGeometry height="29" width="289" x="262" y="722" as="geometry" />
+        <mxCell id="uc7b5UVpd8qzJGzJCXFV-29" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;strokeWidth=2;fontSize=10;fontStyle=1;fontFamily=Times New Roman;" value="&lt;span style=&quot;font-weight: normal;&quot;&gt;Brain signal conditions target-token prediction via cross-attention&lt;/span&gt;&lt;div&gt;&lt;span style=&quot;font-weight: normal;&quot;&gt;&lt;i&gt;Target objective:&lt;/i&gt; target-token NLL&lt;/span&gt;&lt;/div&gt;" vertex="1">
+          <mxGeometry height="29" width="289" x="262" y="731.39" as="geometry" />
         </mxCell>
       </root>
     </mxGraphModel>
