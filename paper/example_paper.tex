@@ -54,7 +54,7 @@ We study brain-state conditioning as a control problem and introduce a \emph{pai
 We quantify this distinction between generic perturbation and \emph{useful deformation} with Jensen-Shannon divergence (JSD) and next-token negative log-likelihood (NLL).
 We intentionally evaluate this principle in two regimes.
 In controlled synthetic TVB experiments, brain conditioning grows stronger with dimensionality, but only matched brain states improve NLL; shuffled and Gaussian-matched signals induce comparable deformation while harming prediction, and freezing the brain pathway removes all effects.
-In real MEG-MASC, we use a T5 cross-attention model over post-word MEG windows and find that, after correcting decoder-context leakage and MEG scaling, matched MEG improves target-word NLL over both zeroed and shuffled MEG on random held-out and story-blocked splits, with $\Delta$NLL gains of roughly $0.08$--$0.11$.
+In real MEG-MASC, we use a T5 cross-attention model over post-word MEG windows and find that, after correcting decoder-context leakage and MEG scaling, matched MEG improves target-word NLL over both zeroed and shuffled MEG on random, story-blocked, and subject-blocked splits, with $\Delta$NLL gains of roughly $0.08$--$0.11$; leave-one-subject-out evaluation remains negative for all 11 held-out subjects.
 The real effect is modest rather than full neural decoding, but it survives unseen-story evaluation and changes the top-1 prediction on about $10\%$ of held-out examples.
 Together, these results argue that neural-state conditioning should be judged by paired controls and that this criterion reveals both strong synthetic mechanism and a modest but real held-out MEG alignment effect.
 \end{abstract}
@@ -89,13 +89,11 @@ Our central claim is that neural-state conditioning should be judged by \emph{pa
 
 \begin{figure*}[t]
     \centering
-    \includegraphics[width=\linewidth]{fig_overview_paired_control.png}
+    \includegraphics[width=\linewidth]{pipeline.png}
     \caption{
-    Overview of the paper.
-    We study brain-conditioned language modeling in two regimes: synthetic TVB states $z\in\mathbb{R}^d$ for controlled mechanism studies, and real post-word MEG windows $B_{1:T}\in\mathbb{R}^{T\times C}$ for held-out validation.
-    Both are encoded and used to condition a pretrained T5 via cross-attention.
-    The core evaluation is paired-control: REAL uses the matched brain input, ZERO removes it, and SHUF replaces it with a mismatched input from another example.
-    Brain conditioning is considered useful only when REAL improves predictive utility over both ZERO and SHUF, while JSD and top-1 change quantify the size of the induced distributional deformation.
+    Brain-conditioned language modeling as controllable next-token distribution deformation.
+    A brain snapshot $z$ is encoded into a control vector $a$ and injected into a Transformer LM's hidden states.
+    We compare the resulting next-token distribution $p(\cdot\mid x,z)$ against the zero-brain baseline $p(\cdot\mid x,0)$ using Jensen-Shannon divergence (JSD), top-1 agreement, and $\Delta$NLL.
     }
     \label{fig:pipeline}
 \end{figure*}
@@ -104,7 +102,7 @@ Our central claim is that neural-state conditioning should be judged by \emph{pa
 \paragraph{Contributions.}
 (i) We introduce \emph{paired-control evaluation} for neural-state conditioning: brain input should be judged by whether it produces \emph{useful deformation}, improving prediction over both ZERO and SHUF controls rather than merely changing the output distribution.
 (ii) In synthetic TVB experiments, we use this criterion to identify mechanism: control strength scales with dimensionality, deformation concentrates more strongly on content-bearing tokens, and both helpful and harmful signals act through a compact low-dimensional control subspace.
-(iii) On real MEG-MASC recordings, we show that the same criterion survives held-out evaluation: a T5 cross-attention model with post-word MEG windows improves target-word NLL over both ZERO and SHUF on random and story-blocked splits after correcting decoder leakage and signal-scale failures.
+(iii) On real MEG-MASC recordings, we show that the same criterion survives held-out evaluation: a T5 cross-attention model with post-word MEG windows improves target-word NLL over both ZERO and SHUF on random, story-blocked, and subject-blocked splits after correcting decoder leakage and signal-scale failures, and remains negative for every held-out subject in leave-one-subject-out evaluation.
 (iv) We provide diagnostic analyses and negative results that sharpen the claim rather than soften it, including frozen-pathway controls, failed peri-word and leakage-prone setups, and attention analyses showing that pairing-specific gains are more visible in NLL than in coarse attention timing.
 
 
@@ -177,7 +175,7 @@ We preprocess KIT MEG recordings, build word-aligned examples, and use post-word
 The real-data pilot contains 200k word-aligned examples.
 To avoid text leakage, the decoder is trained in a target-only mode: it receives shifted target tokens, but not the preceding story context.
 The brain window is normalized per example before the temporal brain encoder.
-We report both random train/test splits and story-blocked held-out evaluation to reduce story-level leakage.
+We report random train/test splits, story-blocked held-out evaluation to reduce story-level leakage, subject-blocked evaluation, and leave-one-subject-out (LOSO) subject generalization.
 
 \section{Experiments}
 \label{sec:experiments}
@@ -286,7 +284,7 @@ First, when decoder-side text context was available under standard teacher forci
 Second, an initial z-scoring implementation added a fixed $10^{-6}$ constant to channel standard deviations.
 Because raw MEG values are stored in very small physical units, this collapsed the effective brain inputs toward zero; a diagnostic batch had mean absolute input magnitude $\approx 1.4\times 10^{-7}$ and nearly identical logits for REAL and ZERO.
 After correcting these issues, a conservative cross-attention-only model produced only a tiny in-sample effect (reported in Appendix~\ref{app:meg_t5_diagnostics}).
-We therefore evaluate the stronger post-word hybrid configuration on two held-out regimes: a standard random split and a story-blocked split that withholds entire stories at test time.
+We therefore evaluate the stronger post-word hybrid configuration on three held-out regimes: a standard random split, a story-blocked split that withholds entire stories at test time, and a subject-blocked split. We then test subject generalization more aggressively with leave-one-subject-out (LOSO) evaluation over all 11 subjects.
 
 \begin{table*}[t]
 \centering
@@ -299,6 +297,7 @@ Split & $n$ & NLL REAL & NLL ZERO & NLL SHUF & $\Delta$R-Z & 95\% CI & $\Delta$R
 \midrule
 Random held-out & 17{,}976 & 5.9661 & 6.0719 & 6.0817 & $-0.1057$ & [$-0.1141$, $-0.0974$] & $-0.1155$ & [$-0.1232$, $-0.1079$] & 0.8745 \\
 Story-blocked & 50{,}000 & 7.1885 & 7.2933 & 7.2663 & $-0.1048$ & [$-0.1092$, $-0.1004$] & $-0.0778$ & [$-0.0818$, $-0.0738$] & 0.8997 \\
+Subject-blocked & 34{,}240 & 5.9947 & 6.0742 & 6.0771 & $-0.0795$ & [$-0.0845$, $-0.0744$] & $-0.0824$ & [$-0.0871$, $-0.0776$] & 0.9954 \\
 \bottomrule
 \end{tabular}
 }
@@ -307,11 +306,15 @@ Story-blocked & 50{,}000 & 7.1885 & 7.2933 & 7.2663 & $-0.1048$ & [$-0.1092$, $-
 Table~\ref{tab:megmasc_t5} shows that real MEG improves NLL over both zeroed and shuffled MEG on both held-out splits.
 On the random split, REAL beats ZERO by $0.1057$ NLL and SHUF by $0.1155$, with both paired confidence intervals fully below zero.
 More importantly, the effect survives the stricter story-blocked evaluation: REAL remains better than ZERO by $0.1048$ NLL and better than SHUF by $0.0778$.
+The same pattern persists under subject-blocked evaluation, where REAL still beats ZERO by $0.0795$ NLL and SHUF by $0.0824$ on unseen subjects.
 This makes the result substantially stronger than the earlier tiny in-sample cross-attention-only pilot.
 At the same time, it is still not open-vocabulary word decoding.
 Top-1 agreement with the ZERO baseline remains around $0.87$--$0.90$, so the correct MEG window changes the preferred token for only a minority of examples.
 We therefore interpret the result as modest but genuine held-out neural alignment: the matched MEG signal shifts probability mass toward the target more than either no brain input or mismatched brain input, and it does so even on unseen stories.
 To make the effect size more concrete, a $\Delta$NLL of $-0.1048$ corresponds to an approximately $e^{0.1048}\!\approx\!1.11\times$ multiplicative increase in target-token probability under REAL relative to ZERO, while the story-blocked REAL-vs.\ SHUF gap of $-0.0778$ corresponds to about $e^{0.0778}\!\approx\!1.08\times$.
+LOSO evaluation strengthens this further: for every held-out subject, both REAL-ZERO and REAL-SHUF remain negative, with mean subject-level effects of $-0.0819 \pm 0.0189$ and $-0.0796 \pm 0.0233$ (mean $\pm$ s.d. across 11 subjects), and all 22 subject-level 95\% confidence intervals below zero.
+As a null auxiliary baseline, we also replace each MEG window with a matched-shape Gaussian control stream and retrain the same story-blocked architecture.
+This auxiliary stream fails to produce a pairing-specific gain: REAL and SHUF become indistinguishable ($\Delta$R-S $\approx 0.00001$, 95\% CI spanning zero), with negligible deformation (JSD $\approx 6\times10^{-5}$, top-1 agreement with ZERO $\approx 0.999$).
 A temporal ablation on the story-blocked split sharpens this interpretation.
 Restricting the model to the early post-word half ($0.0$--$0.3$ s) collapses the effect ($\Delta$R-Z $\approx -7\times10^{-5}$, $\Delta$R-S $\approx 0$), while the late half ($0.3$--$0.6$ s) retains only a weaker signal ($-0.0227$, $-0.0206$).
 A narrower late slice ($0.45$--$0.6$ s) fails entirely ($\Delta$R-Z $= +0.0005$, $\Delta$R-S $\approx 0$).
@@ -441,7 +444,7 @@ As brain dimensionality increases, next-token distributions deform more strongly
 Shuffled and Gaussian-matched controls can match the deformation magnitude while worsening NLL, so the key distinction is not \emph{whether} the distribution moves, but \emph{whether} it moves in a task-aligned direction.
 
 The real MEG-MASC pilot supports the same logic under held-out evaluation.
-After removing decoder-context leakage and fixing MEG scaling, the post-word T5 model improves target-word NLL over both ZERO and SHUF on random and story-blocked splits, with $\Delta$NLL gains of roughly $0.08$--$0.11$.
+After removing decoder-context leakage and fixing MEG scaling, the post-word T5 model improves target-word NLL over both ZERO and SHUF on random, story-blocked, and subject-blocked splits, with $\Delta$NLL gains of roughly $0.08$--$0.11$.
 These gains are modest and top-1 agreement with ZERO remains close to $0.9$, so the result is not robust word decoding or free-form generation.
 Instead, it is evidence that a small pairing-specific neural effect survives unseen-story evaluation.
 This division of labor is intentional: synthetic data supports the strongest mechanistic claims, while real MEG establishes a narrower held-out alignment claim.
@@ -468,7 +471,7 @@ The useful signal is therefore subtler: it depends on a broader post-word respon
 \section{Limitations}
 
 Most mechanistic claims in this paper are established on synthetic brain-state vectors rather than real neural recordings, so they should be interpreted as claims about controllability and evaluation, not about full neural grounding.
-The MEG-MASC pilot narrows that gap, but its effect remains token-level and modest, and we have not yet tested subject-blocked or leave-one-subject-out generalization.
+The MEG-MASC pilot narrows that gap, but its effect remains token-level and modest even after subject-blocked and leave-one-subject-out validation.
 Our evaluation also emphasizes distributional metrics over sequence-level text quality, so it does not yet show whether these gains improve fluent generation, coherence, or downstream usefulness.
 That choice is deliberate for this paper, because token-level controls expose whether the model is using the brain signal at all, but it leaves open the question of how such gains should translate into qualitative behavior.
 Finally, we study one family of injection mechanisms and coarse-grained interpretability analyses; region-level causal attribution and broader architectural comparisons remain open.
@@ -511,7 +514,7 @@ Seen this way, the paper sits at the intersection of neural decoding, controllab
 
 We study brain-conditioned language modeling as a control problem over next-token distributions.
 Across synthetic experiments, correctly paired brain states produce graded and semantically concentrated deformation that differs from shuffled or Gaussian controls not in magnitude alone, but in whether the deformation improves prediction.
-On real MEG-MASC, the same REAL/ZERO/SHUF logic survives random and story-blocked held-out evaluation after correcting leakage and signal-scaling failures.
+On real MEG-MASC, the same REAL/ZERO/SHUF logic survives random, story-blocked, and subject-blocked held-out evaluation after correcting leakage and signal-scaling failures, and it remains negative for every held-out subject under LOSO.
 The resulting MEG effect is modest, not a full decoding system, but it establishes that pairing-specific neural information can measurably shift target-token probability on unseen stories.
 This gives a practical evaluation template for future work: brain-conditioned models should be judged by paired controls, distribution-level metrics, and held-out mismatch tests rather than by visible output change alone.
 Under that standard, this paper supports three conclusions at once: strong synthetic controllability, modest but real held-out MEG alignment, and informative negative results when architectures contain a brain pathway but fail to use it.
@@ -568,6 +571,7 @@ This appendix reports additional MEG-MASC/T5 diagnostic runs used to interpret t
 We include these results as ablations rather than as final benchmark claims.
 All runs use target-only decoding, per-example brain normalization, and REAL/ZERO/SHUF evaluation.
 Table~\ref{tab:meg_t5_appendix_controls} keeps the in-sample and peri-word diagnostics, Table~\ref{tab:meg_t5_appendix_heldout} summarizes the held-out post-word hybrid results reported in the main text, and Table~\ref{tab:meg_t5_appendix_windows} isolates early and late subwindows within the successful post-word window.
+Table~\ref{tab:meg_t5_appendix_aux} then reports a matched-shape random auxiliary-stream baseline used to test whether any continuous side channel can reproduce the held-out MEG effect.
 
 \begin{figure}[h]
 \centering
@@ -626,7 +630,7 @@ Post-word hybrid last1 & [$-0.1265$, $-0.1163$] & [$-0.1118$, $-0.1030$] & 0.550
 \centering
 \caption{
 Held-out post-word hybrid results for MEG-MASC/T5.
-Both random held-out and story-blocked evaluation preserve the REAL $<$ ZERO and REAL $<$ SHUF control pattern.
+Random held-out, story-blocked, and subject-blocked evaluation all preserve the REAL $<$ ZERO and REAL $<$ SHUF control pattern.
 }
 \label{tab:meg_t5_appendix_heldout}
 \resizebox{\linewidth}{!}{%
@@ -636,6 +640,45 @@ Split & $n$ & $\Delta$R-Z 95\% CI & $\Delta$R-S 95\% CI & Win R-Z & Win R-S & JS
 \midrule
 Random held-out & 17{,}976 & [$-0.1141$, $-0.0974$] & [$-0.1232$, $-0.1079$] & 0.5309 & 0.5595 & 0.0157 & 0.0159 & 0.8745 \\
 Story-blocked & 50{,}000 & [$-0.1092$, $-0.1004$] & [$-0.0818$, $-0.0738$] & 0.5491 & 0.5371 & 0.0088 & 0.0088 & 0.8997 \\
+Subject-blocked & 34{,}240 & [$-0.0845$, $-0.0744$] & [$-0.0871$, $-0.0776$] & 0.5386 & 0.5465 & 0.0103 & 0.0104 & 0.9954 \\
+\bottomrule
+\end{tabular}
+}
+\end{table*}
+
+\begin{table*}[h]
+\centering
+\caption{
+Leave-one-subject-out (LOSO) summary for the post-word hybrid MEG-MASC/T5 model.
+Each of the 11 subjects is held out once for testing.
+All subject-level REAL-ZERO and REAL-SHUF 95\% confidence intervals remain below zero.
+}
+\label{tab:meg_t5_appendix_loso}
+\resizebox{0.9\linewidth}{!}{%
+\begin{tabular}{lccccc}
+\toprule
+Subjects & Total held-out $n$ & Mean $\Delta$R-Z & s.d. & Mean $\Delta$R-S & s.d. \\
+\midrule
+11 held-out subjects & 179{,}760 & $-0.0819$ & 0.0189 & $-0.0796$ & 0.0233 \\
+\bottomrule
+\end{tabular}
+}
+\end{table*}
+
+\begin{table*}[h]
+\centering
+\caption{
+Matched-shape auxiliary-stream null baseline on the story-blocked split.
+Each MEG window is replaced with a Gaussian auxiliary stream of the same temporal shape, and the same T5 architecture is retrained from scratch.
+The auxiliary stream does not produce a pairing-specific advantage: REAL and SHUF are indistinguishable and both remain near the ZERO baseline.
+}
+\label{tab:meg_t5_appendix_aux}
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{lccccccccc}
+\toprule
+Auxiliary input & $n$ & NLL REAL & NLL ZERO & NLL SHUF & $\Delta$R-Z & 95\% CI & $\Delta$R-S & 95\% CI & Top-1 R/Z \\
+\midrule
+Gaussian iid stream & 50{,}000 & 7.2048 & 7.2057 & 7.2048 & $-0.0008$ & [$-0.0010$, $-0.0006$] & $+0.0000$ & [$-0.0002$, $+0.0002$] & 0.9994 \\
 \bottomrule
 \end{tabular}
 }
@@ -704,7 +747,7 @@ These ablations support three practical conclusions.
 First, loss curves are necessary but insufficient: the peri-word run optimizes, yet REAL is substantially worse than ZERO.
 Second, temporal structure matters within the successful post-word window itself: the early half is effectively null, the late half is only weakly useful, and the narrow late slice fails, so the main effect is distributed across the broader $0.0$--$0.6$ s response rather than reducible to a single late peak.
 Third, increasing trainable capacity by unfreezing the last T5 block can dramatically improve controls, and the new held-out tables show that this gain is not purely in-sample.
-Random held-out and story-blocked evaluation both preserve a clear REAL advantage over ZERO and SHUF, while the peri-word variant remains a cautionary example that stronger brain dependence can still be harmful.
+Random held-out, story-blocked, subject-blocked, and LOSO evaluation all preserve a clear REAL advantage over ZERO and SHUF, while the peri-word variant remains a cautionary example that stronger brain dependence can still be harmful.
 
 
 

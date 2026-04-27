@@ -521,7 +521,100 @@ tight-late > late-only -> even narrower late window is sufficient
 all windows similar -> attention timing likely reflects positional preference more than informative timing
 ```
 
-## Step 7: Attention Extraction
+## Step 7: Auxiliary-Stream Null Baseline
+
+This is the cleanest answer to the reviewer concern that any continuous side
+channel might help through the same architecture. Keep the text, metadata,
+sequence lengths, and model path fixed, but replace every MEG window with a
+matched-shape random auxiliary stream.
+
+For the paper, the best first comparison is against the successful
+story-blocked post-word run.
+
+Build matched-shape random auxiliary datasets:
+
+```bash
+python3 brain_text_pipeline/scripts/build_aux_control_dataset.py \
+  --source_manifest brain_text_pipeline/data/meg_aligned_postword_story_train/manifest.json \
+  --out_dir brain_text_pipeline/data/aux_random_postword_story_train \
+  --mode gaussian_iid \
+  --seed 42
+```
+
+```bash
+python3 brain_text_pipeline/scripts/build_aux_control_dataset.py \
+  --source_manifest brain_text_pipeline/data/meg_aligned_postword_story_test/manifest.json \
+  --out_dir brain_text_pipeline/data/aux_random_postword_story_test \
+  --mode gaussian_iid \
+  --seed 42
+```
+
+Train the exact same T5 configuration on the auxiliary stream:
+
+```bash
+python3 brain_text_pipeline/scripts/train_t5_brain_crossattn.py \
+  --mode meg_supervised \
+  --model_name_or_path t5-small \
+  --meg_dataset_path brain_text_pipeline/data/aux_random_postword_story_train/manifest.json \
+  --output_dir brain_text_pipeline/runs/t5_aux_random_postword_story_hybrid_last1 \
+  --batch_size 32 \
+  --lr 5e-5 \
+  --epochs 6 \
+  --bf16 \
+  --freeze_t5 \
+  --unfreeze_cross_attn \
+  --cross_attn_last_n 6 \
+  --unfreeze_last_n 1 \
+  --decoder_context_mode target_only \
+  --brain_norm per_example \
+  --max_text_len 8 \
+  --max_brain_len 120 \
+  --log_interval 100 \
+  --cpu_threads 8 \
+  --num_workers 0 \
+  --device cuda
+```
+
+Evaluate with the same REAL/ZERO/SHUF script:
+
+```bash
+python3 brain_text_pipeline/scripts/eval_brain_controls.py \
+  --model_name_or_path brain_text_pipeline/runs/t5_aux_random_postword_story_hybrid_last1 \
+  --brain_encoder_ckpt brain_text_pipeline/runs/t5_aux_random_postword_story_hybrid_last1/brain_encoder.pt \
+  --meg_dataset_path brain_text_pipeline/data/aux_random_postword_story_test/manifest.json \
+  --samples 50000 \
+  --batch_size 32 \
+  --device cuda \
+  --decoder_context_mode target_only \
+  --brain_norm per_example \
+  --max_text_len 8 \
+  --max_brain_len 120 \
+  --seed 42 \
+  --out_json brain_text_pipeline/runs/t5_aux_random_postword_story_hybrid_last1/eval_story_test_50k.json
+```
+
+Expected interpretation:
+
+```text
+If arbitrary side channels are not enough, the random auxiliary stream should
+fail to show a stable REAL advantage over both ZERO and SHUF.
+```
+
+Optional variant:
+
+```bash
+python3 brain_text_pipeline/scripts/build_aux_control_dataset.py \
+  --source_manifest brain_text_pipeline/data/meg_aligned_postword_story_train/manifest.json \
+  --out_dir brain_text_pipeline/data/aux_globalgauss_postword_story_train \
+  --mode gaussian_global \
+  --seed 42
+```
+
+`gaussian_global` matches the source dataset's per-channel mean/std before
+training. With per-example brain normalization enabled, `gaussian_iid` is
+usually the cleaner null.
+
+## Step 8: Attention Extraction
 
 Run this after the best held-out model is selected.
 
