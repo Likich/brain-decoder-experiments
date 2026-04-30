@@ -31,6 +31,8 @@ brain.zip
 *.bak
 
 # --- LaTeX / paper sources ---
+/paper/
+/paper_position_neurips2026/
 *.tex
 *.aux
 *.bbl
