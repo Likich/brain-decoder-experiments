@@ -26,6 +26,17 @@ For the exact paper-facing commands, use:
 
 That file is the canonical experiment logbook. The README here is only a shorter map.
 
+## What Is Local Only
+
+This subproject assumes a local workspace that contains generated datasets and checkpoints, but those artifacts are intentionally not tracked on GitHub. In practice you will usually have:
+
+- `brain_text_pipeline/data/`
+  - preprocessed MEG, word-aligned shards, manifests, auxiliary-control datasets
+- `brain_text_pipeline/runs/`
+  - checkpoints, eval JSON, qualitative pools, multiseed summaries, and logs
+
+Treat those as generated experiment state, not source-controlled inputs.
+
 ## Core Design
 
 The main real-data setup is:
@@ -174,6 +185,7 @@ Examples typically include:
 
 ## Notes
 
-- The main held-out MEG result depends critically on `brain_norm=per_example`.
+- The main held-out MEG result depends critically on `brain_norm=per_example`; the cheap `brain_norm=none` sensitivity run collapses the paired-control effect.
 - The target-only decoder setup is intentional and is used to prevent decoder-context leakage.
+- The main real-data claim is controlled target-word likelihood modulation under paired controls, not standard full-context autoregressive LM improvement.
 - The paper directories are local-only and not tracked in Git; rebuild the paper from your local `paper/` folder if needed.

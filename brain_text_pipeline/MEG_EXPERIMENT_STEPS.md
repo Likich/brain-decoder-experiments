@@ -336,10 +336,10 @@ python3 brain_text_pipeline/scripts/eval_brain_controls.py \
 
 ### Clustered statistics for the story-blocked result
 
-To address reviewer concerns about anti-conservative token-level confidence
-intervals, rerun the story-blocked evaluation with per-example export and then
-compute clustered bootstrap CIs over `subject`, `story`, and joint
-`subject,story` clusters.
+To check that token-level confidence intervals are not anti-conservative,
+rerun the story-blocked evaluation with per-example export and then compute
+clustered bootstrap CIs over `subject`, `story`, and joint `subject,story`
+clusters.
 
 ```bash
 python3 brain_text_pipeline/scripts/eval_brain_controls.py \
@@ -451,7 +451,7 @@ python3 brain_text_pipeline/scripts/eval_brain_controls.py ... --shuf_mode block
 python3 brain_text_pipeline/scripts/eval_brain_controls.py ... --shuf_mode phase_randomized ...
 ```
 
-Best-case reviewer story:
+Best-case summary:
 
 ```text
 REAL beats ZERO and every SHUF variant that preserves subject, recording, or temporal structure.
@@ -848,7 +848,7 @@ all windows similar -> attention timing likely reflects positional preference mo
 
 ## Step 7: Auxiliary-Stream Null Baseline
 
-This is the cleanest answer to the reviewer concern that any continuous side
+This is the cleanest answer to the question of whether any continuous side
 channel might help through the same architecture. Keep the text, metadata,
 sequence lengths, and model path fixed, but replace every MEG window with a
 matched-shape random auxiliary stream.

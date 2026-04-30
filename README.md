@@ -25,10 +25,21 @@ If you are starting fresh, use `brain_text_pipeline/` first. The legacy simulato
   - legacy simulator components for cortical dynamics, gating, memory, and simple report generation.
 - `configs/`
   - legacy simulator configuration.
-- `data/`, `runs/`, `outputs/`, `models/`
-  - local experiment artifacts; these are intentionally ignored by Git.
-- `paper/`, `paper_position_neurips2026/`
-  - local-only paper directories. These stay on disk but are intentionally not tracked in Git.
+- local paper draft folders such as `paper/`
+  - these stay on disk but are intentionally not tracked in Git.
+
+## Local-Only Artifacts
+
+The GitHub repo intentionally excludes large or generated experiment state. In a working local checkout you may still have:
+
+- `data/`
+  - local datasets, preprocessed MEG, simulator outputs, and cached JSONL/NPZ artifacts
+- `runs/`
+  - model checkpoints, eval JSON, qualitative pools, and logs
+- `outputs/`, `models/`
+  - other generated artifacts from older code paths
+
+These directories are part of the expected local workflow, but they are intentionally ignored by Git and should not be treated as canonical source files.
 
 ## Active MEG Workflow
 
@@ -69,5 +80,5 @@ Useful legacy components:
 ## Notes
 
 - The paper directories are intentionally excluded from GitHub now. If you need to rebuild the paper locally, use the local files in `paper/`.
-- The MEG pipeline assumes local access to MEG-MASC and writes large sharded datasets; keep those artifacts out of version control.
+- The MEG pipeline assumes local access to MEG-MASC and writes large sharded datasets and checkpoints under local `data/` and `runs/` directories; keep those artifacts out of version control.
 - The most up-to-date experiment instructions live in `brain_text_pipeline/MEG_EXPERIMENT_STEPS.md`, not in old shell history or notebook snippets.

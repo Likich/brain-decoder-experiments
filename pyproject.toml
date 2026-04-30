@@ -7,7 +7,6 @@ build-backend = "setuptools.build_meta"
 name = "lefty_brain_sim"
 version = "0.1.0"
 description = "Left-hemisphere ignition, choice, and report simulation (TVB + RL + LLM)"
-authors = [{name = "Angelina et al."}]
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

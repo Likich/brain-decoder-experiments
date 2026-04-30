@@ -33,7 +33,8 @@ brain.zip
 
 # --- LaTeX / paper sources ---
 /paper/
-/paper_position_neurips2026/
+/paper_position_*/
+*.egg-info/
 *.tex
 *.aux
 *.bbl
