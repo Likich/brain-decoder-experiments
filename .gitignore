@@ -23,6 +23,7 @@ env/
 /models/
 /runs/
 /data/
+brain.drawio
 brain.zip
 
 # --- Logs / temp ---
