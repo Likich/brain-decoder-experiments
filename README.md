@@ -1,107 +1,73 @@
-# Brain Simulator
+# Brain Decoder Experiments
 
+This repository now has two distinct tracks:
 
-A minimal, research-ready scaffold for simulating left-hemisphere ignition,
-choices, and textual report. TVB provides region-level dynamics; an RL-based
-basal-ganglia proxy makes decisions; a thalamic gate polls an LLM module
-for report only when a workspace ignition threshold is met. A simple
-vector-store acts as hippocampal memory.
+1. `brain_text_pipeline/`
+   The active MEG/T5 pipeline used for paired-control evaluation of brain-conditioned language modeling.
 
+2. `src/lefty_brain_sim/` + `scripts/`
+   An older simulator-oriented code path for synthetic TVB-style experiments and local brain-conditioned language-model prototypes.
 
-> This scaffold compiles to runnable Python components without external APIs.
-> TVB integration points are stubbed behind an interface so you can swap in
-> real TVB calls later.
+If you are starting fresh, use `brain_text_pipeline/` first. The legacy simulator code is still useful for synthetic experiments, tokenizer training, and earlier local decoder baselines, but it is no longer the main entry point for the held-out MEG results.
 
+## Main Entry Points
 
-## Quick start
+- Active pipeline overview: [`brain_text_pipeline/README.md`](brain_text_pipeline/README.md)
+- Full experiment commands: [`brain_text_pipeline/MEG_EXPERIMENT_STEPS.md`](brain_text_pipeline/MEG_EXPERIMENT_STEPS.md)
+
+## Repository Layout
+
+- `brain_text_pipeline/`
+  - MEG preprocessing, word-aligned sharded datasets, T5 cross-attention training, paired-control evaluation, stricter SHUF controls, clustered bootstrap, qualitative tables, BERT positive controls, and sensor ablations.
+- `scripts/`
+  - legacy synthetic/TVB and local LM training utilities.
+- `src/lefty_brain_sim/`
+  - legacy simulator components for cortical dynamics, gating, memory, and simple report generation.
+- `configs/`
+  - legacy simulator configuration.
+- `data/`, `runs/`, `outputs/`, `models/`
+  - local experiment artifacts; these are intentionally ignored by Git.
+- `paper/`, `paper_position_neurips2026/`
+  - local-only paper directories. These stay on disk but are intentionally not tracked in Git.
+
+## Active MEG Workflow
+
+The current paper-facing workflow is:
+
+1. preprocess MEG-MASC
+2. build word-aligned sharded datasets
+3. split by random/story/subject/LOSO as needed
+4. train a T5 brain cross-attention model with:
+   - `decoder_context_mode=target_only`
+   - `brain_norm=per_example`
+5. evaluate REAL vs ZERO vs SHUF with held-out paired controls
+6. run stricter SHUF variants, clustered bootstrap, characterization, and sensor ablations
+
+Use [`brain_text_pipeline/MEG_EXPERIMENT_STEPS.md`](brain_text_pipeline/MEG_EXPERIMENT_STEPS.md) for the exact commands.
+
+## Legacy Simulator Quick Start
+
+If you need the older simulator path:
+
 ```bash
-python -m venv .venv && source .venv/bin/activate
+python -m venv .venv
+source .venv/bin/activate
 pip install -e .
 python scripts/run_experiment.py --config configs/default.yaml
 ```
 
+Useful legacy components:
 
-## Layout
-- `src/lefty_brain_sim/tvb_iface.py` — interface & mock TVB engine
-- `src/lefty_brain_sim/decision.py` — Wong–Wang-like 2-well decision node
-- `src/lefty_brain_sim/gating.py` — thalamic gate & ignition metrics
-- `src/lefty_brain_sim/llm_iface.py` — LLM evidence provider interface (mock)
-- `src/lefty_brain_sim/memory.py` — simple FAISS vector memory (hippocampus)
-- `src/lefty_brain_sim/encdec.py` — encoders/decoders between TVB state and LLM
-- `src/lefty_brain_sim/experiment.py` — trial orchestration
-- `scripts/run_experiment.py` — CLI entry point
-- `configs/default.yaml` — experiment config
-
+- `src/lefty_brain_sim/tvb_iface.py`
+- `src/lefty_brain_sim/decision.py`
+- `src/lefty_brain_sim/gating.py`
+- `src/lefty_brain_sim/memory.py`
+- `scripts/build_brain_conditioned_dataset.py`
+- `scripts/train_language_model.py`
+- `scripts/train_brain_decoder.py`
 
 ## Notes
-- Replace the mock TVB engine with `tvb-library` coupling + monitors.
-- Replace `MockLLM` with your preferred LLM backend or an API wrapper.
-- All components are pure Python and unit-testable.
 
-### Corpus helper
-Run `python scripts/download_wiki40b.py --lang en --split train[:0.05%] --max_articles 500`
-to grab a small Wiki40B shard locally (requires the Hugging Face `datasets` package).
-The resulting JSONL in `data/` can seed your token-level stimulus pipeline.
-
-### Tokenizer + tokens
-1. `python scripts/train_tokenizer.py --input data/wiki40b_en.jsonl --vocab_size 2048`
-   writes `models/wiki_tokenizer.json`.
-2. `python scripts/encode_corpus_tokens.py --tokenizer models/wiki_tokenizer.json`
-   emits token-id sequences to `data/wiki40b_tokens.jsonl`, ready for ingestion.
-
-### Brain-conditioned next-token pipeline (recommended)
-This ties cortex snapshots directly into a transformer LM and works with 136-region TVB.
-1) Train tokenizer + get token schedule (see above).
-2) Generate paired data (context, brain snapshot, next token):
-   ```
-   python scripts/build_brain_conditioned_dataset.py \
-     --config configs/default.yaml \
-     --token_file data/wiki40b_tokens.jsonl \
-     --out data/brain_ctx_pairs_100k.npz \
-     --max_samples 100000 --snr high
-   ```
-3) Train the brain-conditioned LM:
-   ```
-   python scripts/train_language_model.py \
-     --data_file dummy.txt \
-     --tokenizer_file models/wiki_tokenizer.json \
-     --brain_dataset data/brain_ctx_pairs_100k.npz \
-     --epochs 10 --batch_size 32 --block_size 96 \
-     --hidden_dim 384 --num_layers 2 --attn_heads 8 \
-     --lr 3.9e-4 --dropout 0.11 --device cuda
-   ```
-4) Chat with the trained model:
-   ```
-   python scripts/brain_chat.py \
-     --tokenizer models/wiki_tokenizer.json \
-     --ckpt models/language_model.pt \
-     --brain_dataset data/brain_ctx_pairs_100k.npz \
-     --brain_index 0 --block_size 96 \
-     --hidden_dim 384 --num_layers 2 --attn_heads 8 --dropout 0.11
-   ```
-
-### Legacy local decoder pipeline (fruits/5-way)
-If you still want the simple classifier path:
-1. Run simulator to produce `outputs/experiment.jsonl`.
-2. Build dataset:
-   ```
-   python scripts/build_dataset.py --input outputs/experiment.jsonl \
-       --tokenizer models/wiki_tokenizer.json --use-target \
-       --out data/brain_next_token.npz
-   ```
-3. Train decoder:
-   ```
-   python scripts/train_brain_decoder.py --data data/brain_next_token.npz \
-       --tokenizer models/wiki_tokenizer.json --use_attention
-   ```
-4. Set `llm_provider: "local_decoder"` in `configs/default.yaml` to use it.
-
-### Interactive chat (brain-conditioned)
-See step 4 above; `scripts/brain_chat.py` now wraps the brain-conditioned LM. Type `quit` to exit.
-
-## Generative loop
-Set `generation.enabled: true` (default) to have each trial roll into an
-autoregressive loop. Once the cortex/decoder produces a categorical decision,
-that token is fed back as the next stimulus and the loop continues until
-`generation.max_tokens` are emitted. Generated sequences are stored on each
-trial line under `generated_tokens`.
+- The paper directories are intentionally excluded from GitHub now. If you need to rebuild the paper locally, use the local files in `paper/`.
+- The MEG pipeline assumes local access to MEG-MASC and writes large sharded datasets; keep those artifacts out of version control.
+- The most up-to-date experiment instructions live in `brain_text_pipeline/MEG_EXPERIMENT_STEPS.md`, not in old shell history or notebook snippets.

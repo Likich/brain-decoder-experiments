@@ -285,6 +285,55 @@ If this succeeds, it becomes the main MEG result. If random succeeds but
 story-blocked fails, the paper should say the signal exists under random
 held-out examples but robust story generalization remains unresolved.
 
+### Multi-seed story-blocked robustness and normalization sensitivity
+
+To reduce the single-seed weakness, rerun the main story-blocked MEG setup for
+multiple seeds and summarize the resulting held-out metrics. The helper script
+below reuses the existing seed-42 per-example-normalized run when present,
+trains missing seeds, and also trains one `brain_norm=none` variant as a
+normalization sensitivity check.
+
+```bash
+bash brain_text_pipeline/scripts/run_meg_story_multiseed.sh
+```
+
+Default behavior:
+- seeds: `42 7 123`
+- primary normalization: `per_example`
+- extra normalization check: `none` for seed `42`
+
+Useful overrides:
+
+```bash
+SEEDS="42 7 123" ALT_NORM_SEEDS="42" DEVICE=cuda \
+bash brain_text_pipeline/scripts/run_meg_story_multiseed.sh
+```
+
+The summary is written to:
+
+```text
+brain_text_pipeline/runs/t5_meg_postword_story_hybrid_last1_multiseed_summary.json
+```
+
+If you only want the cheapest normalization check on the existing
+per-example-normalized story-blocked model without retraining, run:
+
+```bash
+python3 brain_text_pipeline/scripts/eval_brain_controls.py \
+  --model_name_or_path brain_text_pipeline/runs/t5_meg_postword_story_hybrid_last1 \
+  --brain_encoder_ckpt brain_text_pipeline/runs/t5_meg_postword_story_hybrid_last1/brain_encoder.pt \
+  --meg_dataset_path brain_text_pipeline/data/meg_aligned_postword_story_test/manifest.json \
+  --samples 50000 \
+  --batch_size 32 \
+  --device cuda \
+  --decoder_context_mode target_only \
+  --brain_norm none \
+  --max_text_len 8 \
+  --max_brain_len 120 \
+  --seed 42 \
+  --out_json brain_text_pipeline/runs/t5_meg_postword_story_hybrid_last1/eval_story_test_50k_norm_none.json
+```
+
 ### Clustered statistics for the story-blocked result
 
 To address reviewer concerns about anti-conservative token-level confidence
