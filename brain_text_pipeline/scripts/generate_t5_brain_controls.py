@@ -31,6 +31,13 @@ from brain_text_pipeline.src.data.datasets import ShardedExampleDataset
 from brain_text_pipeline.src.models.t5_brain_model import T5BrainModel
 from brain_text_pipeline.src.utils.logging import log
 
+STOPWORD_TARGETS = {
+    "a", "an", "and", "as", "at", "be", "but", "by", "for", "from", "had",
+    "he", "her", "his", "i", "if", "in", "is", "it", "its", "me", "my",
+    "of", "on", "or", "our", "she", "that", "the", "their", "there", "they",
+    "this", "to", "we", "with", "you", "your",
+}
+
 
 def resolve_device(arg: str | None) -> torch.device:
     if arg:
@@ -51,6 +58,66 @@ def per_example_nll(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
     return (losses * valid).sum(dim=1) / denom
 
 
+def resolve_control_slice(
+    *,
+    manifest: dict[str, Any],
+    brain_dim: int,
+    control_feature_group: str,
+    control_feature_start: int | None,
+    control_feature_end: int | None,
+) -> slice | None:
+    if control_feature_start is not None or control_feature_end is not None:
+        if control_feature_start is None or control_feature_end is None:
+            raise ValueError("both --control_feature_start and --control_feature_end must be set together")
+        start = int(control_feature_start)
+        end = int(control_feature_end)
+        if not (0 <= start < end <= brain_dim):
+            raise ValueError(f"invalid control feature slice [{start}:{end}) for brain_dim={brain_dim}")
+        return slice(start, end)
+
+    if control_feature_group == "all":
+        return None
+
+    combined = manifest.get("combined_aux")
+    if not isinstance(combined, dict):
+        raise ValueError(
+            f"--control_feature_group={control_feature_group!r} requires manifest metadata 'combined_aux'"
+        )
+    if combined.get("feature_order") != "meg_then_aux":
+        raise ValueError(
+            "only combined_aux.feature_order='meg_then_aux' is currently supported, "
+            f"got {combined.get('feature_order')!r}"
+        )
+
+    meg_dim = int(combined.get("meg_dim", 0))
+    aux_dim = int(combined.get("aux_dim", 0))
+    total_dim = meg_dim + aux_dim
+    if total_dim != brain_dim:
+        raise ValueError(f"manifest combined_aux dims sum to {total_dim}, but dataset brain_dim={brain_dim}")
+
+    if control_feature_group == "meg_only":
+        return slice(0, meg_dim)
+    if control_feature_group == "aux_only":
+        return slice(meg_dim, total_dim)
+    raise ValueError(f"unknown control_feature_group: {control_feature_group}")
+
+
+def zero_control(brain_seq: torch.Tensor, control_slice: slice | None) -> torch.Tensor:
+    if control_slice is None:
+        return torch.zeros_like(brain_seq)
+    out = brain_seq.clone()
+    out[:, :, control_slice] = 0.0
+    return out
+
+
+def shuffled_control(brain_seq: torch.Tensor, perm: torch.Tensor, control_slice: slice | None) -> torch.Tensor:
+    if control_slice is None:
+        return brain_seq[perm]
+    out = brain_seq.clone()
+    out[:, :, control_slice] = brain_seq[perm][:, :, control_slice]
+    return out
+
+
 def decode_ids(tokenizer, ids: Any) -> str:
     arr = np.asarray(ids)
     if arr.dtype == object:
@@ -67,6 +134,14 @@ def meta_dict(meta: Any) -> dict[str, Any]:
         except Exception:
             return {}
     return {}
+
+
+def normalize_target_text(text: str) -> str:
+    return " ".join(str(text).split()).strip().lower()
+
+
+def alpha_char_count(text: str) -> int:
+    return sum(ch.isalpha() for ch in str(text))
 
 
 def decoder_start_id(model: T5BrainModel, tokenizer) -> int:
@@ -198,6 +273,12 @@ def main() -> None:
     ap.add_argument("--brain_encoder_ckpt", type=Path, required=True)
     ap.add_argument("--meg_dataset_path", type=Path, required=True)
     ap.add_argument("--out_jsonl", type=Path, required=True)
+    ap.add_argument(
+        "--out_json",
+        type=Path,
+        default=None,
+        help="Optional JSON array output containing the same selected rows as --out_jsonl",
+    )
     ap.add_argument("--samples", type=int, default=256, help="Candidate examples to score")
     ap.add_argument("--show", type=int, default=20, help="Examples to write after selection")
     ap.add_argument("--batch_size", type=int, default=16)
@@ -217,16 +298,50 @@ def main() -> None:
     )
     ap.add_argument(
         "--selection",
-        choices=["random", "real_beats_controls", "largest_real_gain"],
+        choices=["random", "real_beats_controls", "largest_real_gain", "largest_first_prob_gain", "smallest_abs_gap"],
         default="real_beats_controls",
         help="How to choose examples for qualitative display",
+    )
+    ap.add_argument(
+        "--source_label",
+        type=str,
+        default="",
+        help="Optional label stored in each JSONL row, e.g. 'Real MEG' or 'Gaussian null'",
     )
     ap.add_argument(
         "--single_token_only",
         action="store_true",
         help="Keep only examples whose target consists of a single supervised token",
     )
+    ap.add_argument(
+        "--exclude_stopword_targets",
+        action="store_true",
+        help="Drop examples whose decoded target is a common stopword/function word",
+    )
+    ap.add_argument(
+        "--require_alpha_target",
+        action="store_true",
+        help="Keep only examples whose decoded target contains at least --min_alpha_chars alphabetic characters",
+    )
+    ap.add_argument(
+        "--min_alpha_chars",
+        type=int,
+        default=1,
+        help="Minimum number of alphabetic characters required when --require_alpha_target is set",
+    )
     ap.add_argument("--top_k", type=int, default=8)
+    ap.add_argument(
+        "--control_feature_group",
+        choices=["all", "meg_only", "aux_only"],
+        default="all",
+        help=(
+            "Which feature block ZERO/SHUF should perturb. "
+            "'all' reproduces the original qualitative scoring. "
+            "'meg_only' and 'aux_only' require combined_aux metadata in the manifest."
+        ),
+    )
+    ap.add_argument("--control_feature_start", type=int, default=None)
+    ap.add_argument("--control_feature_end", type=int, default=None)
     ap.add_argument(
         "--include_generation",
         action="store_true",
@@ -251,6 +366,13 @@ def main() -> None:
 
     sample = ds[0]["brain_seq"]
     brain_dim = sample.shape[1]
+    control_slice = resolve_control_slice(
+        manifest=ds.manifest,
+        brain_dim=brain_dim,
+        control_feature_group=args.control_feature_group,
+        control_feature_start=args.control_feature_start,
+        control_feature_end=args.control_feature_end,
+    )
     model = T5BrainModel(args.model_name_or_path, brain_dim=brain_dim).to(device)
     model.brain_encoder.load_state_dict(torch.load(args.brain_encoder_ckpt, map_location="cpu"))
     model.eval()
@@ -279,9 +401,10 @@ def main() -> None:
             brain_seq = brain_seq[:, : args.max_brain_len]
             brain_mask = brain_mask[:, : args.max_brain_len]
 
-        brain_zero = torch.zeros_like(brain_seq)
-        brain_shuf = torch.roll(brain_seq, shifts=1, dims=0)
-        mask_shuf = torch.roll(brain_mask, shifts=1, dims=0)
+        brain_zero = zero_control(brain_seq, control_slice)
+        perm = torch.roll(torch.arange(brain_seq.size(0), device=device), shifts=1, dims=0)
+        brain_shuf = shuffled_control(brain_seq, perm, control_slice)
+        mask_shuf = brain_mask if control_slice is not None else torch.roll(brain_mask, shifts=1, dims=0)
 
         with torch.no_grad():
             out_real = model(brain_seq, brain_mask, dec_in, decoder_attention_mask=dec_attn, labels=labels)
@@ -340,6 +463,7 @@ def main() -> None:
             candidates.append(
                 {
                     "index": int(batch_idxs[j]),
+                    "source_label": args.source_label,
                     "meta": meta,
                     "context_text": decode_ids(tokenizer, item["input_ids_context"]),
                     "target_text": str(meta.get("target_text") or decode_ids(tokenizer, item["decoder_target_ids"])),
@@ -360,17 +484,40 @@ def main() -> None:
                     "top_real": top_real[j],
                     "top_zero": top_zero[j],
                     "top_shuf": top_shuf[j],
+                    "control_feature_group": args.control_feature_group,
+                    "control_feature_start": None if control_slice is None else int(control_slice.start),
+                    "control_feature_end": None if control_slice is None else int(control_slice.stop),
                 }
             )
 
     if args.single_token_only:
         candidates = [c for c in candidates if c["target_len"] == 1]
+    if args.exclude_stopword_targets:
+        candidates = [c for c in candidates if normalize_target_text(c["target_text"]) not in STOPWORD_TARGETS]
+    if args.require_alpha_target:
+        candidates = [c for c in candidates if alpha_char_count(c["target_text"]) >= args.min_alpha_chars]
 
     if args.selection == "real_beats_controls":
         selected = [c for c in candidates if c["delta_real_zero"] < 0 and c["delta_real_shuf"] < 0]
         selected.sort(key=lambda c: c["delta_real_zero"] + c["delta_real_shuf"])
     elif args.selection == "largest_real_gain":
         selected = sorted(candidates, key=lambda c: c["delta_real_zero"] + c["delta_real_shuf"])
+    elif args.selection == "largest_first_prob_gain":
+        selected = sorted(
+            candidates,
+            key=lambda c: (
+                -(
+                    float(c["real_target_stats"].get("first_token_prob") or 0.0)
+                    - float(c["zero_target_stats"].get("first_token_prob") or 0.0)
+                ),
+                c["delta_real_zero"] + c["delta_real_shuf"],
+            ),
+        )
+    elif args.selection == "smallest_abs_gap":
+        selected = sorted(
+            candidates,
+            key=lambda c: abs(c["delta_real_zero"]) + abs(c["delta_real_shuf"]),
+        )
     else:
         selected = candidates
     selected = selected[: args.show]
@@ -379,6 +526,9 @@ def main() -> None:
     with args.out_jsonl.open("w", encoding="utf-8") as f:
         for row in selected:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    if args.out_json is not None:
+        args.out_json.parent.mkdir(parents=True, exist_ok=True)
+        args.out_json.write_text(json.dumps(selected, ensure_ascii=False, indent=2), encoding="utf-8")
 
     log(f"scored {len(candidates)} examples; wrote {len(selected)} to {args.out_jsonl}")
     for row in selected[: min(8, len(selected))]:

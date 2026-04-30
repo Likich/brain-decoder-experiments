@@ -30,5 +30,13 @@ brain.zip
 *.tmp
 *.bak
 
+# --- LaTeX / paper sources ---
+*.tex
+*.aux
+*.bbl
+*.blg
+*.out
+*.synctex.gz
+
 # --- Jupyter ---
 .ipynb_checkpoints/
