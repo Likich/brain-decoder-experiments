@@ -4,6 +4,10 @@ These are the next experiments needed for the paper. The priority is held-out
 REAL/ZERO/SHUF evidence. Qualitative generation comes after the held-out
 control metrics.
 
+If you want the benchmark/toolkit view instead of the paper notebook view, see
+`brain_text_pipeline/PAIRED_CONTROL_BENCH.md` and the wrapper script
+`brain_text_pipeline/scripts/run_paired_control_bench_story.sh`.
+
 All commands assume you are in the repository root and already have:
 
 ```bash

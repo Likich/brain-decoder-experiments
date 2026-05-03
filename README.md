@@ -13,6 +13,7 @@ If you are starting fresh, use `brain_text_pipeline/` first. The legacy simulato
 ## Main Entry Points
 
 - Active pipeline overview: [`brain_text_pipeline/README.md`](brain_text_pipeline/README.md)
+- Paired-control toolkit / benchmark protocol: [`brain_text_pipeline/PAIRED_CONTROL_BENCH.md`](brain_text_pipeline/PAIRED_CONTROL_BENCH.md)
 - Full experiment commands: [`brain_text_pipeline/MEG_EXPERIMENT_STEPS.md`](brain_text_pipeline/MEG_EXPERIMENT_STEPS.md)
 
 ## Repository Layout
@@ -55,6 +56,27 @@ The current paper-facing workflow is:
 6. run stricter SHUF variants, clustered bootstrap, characterization, and sensor ablations
 
 Use [`brain_text_pipeline/MEG_EXPERIMENT_STEPS.md`](brain_text_pipeline/MEG_EXPERIMENT_STEPS.md) for the exact commands.
+
+## PairedControlBench
+
+This repo now also exposes the main evaluation logic as a reusable paired-control
+toolkit:
+
+- `eval_brain_controls.py`
+  - main `REAL / ZERO / SHUF` evaluation plus stricter SHUF variants
+- `clustered_paired_controls.py`
+  - clustered bootstrap uncertainty estimates
+- `analyze_meg_effect_characterization.py`
+  - probability/rank movement and surprisal-stratified summaries
+- `eval_meg_sensor_ablation.py`
+  - coarse sensor-group ablations
+- `run_meg_story_multiseed.sh`
+  - multi-seed robustness and normalization sensitivity
+- `brain_text_pipeline/scripts/run_paired_control_bench_story.sh`
+  - one-command wrapper for the core story-blocked benchmark outputs
+
+The protocol and expected outputs are documented in
+[`brain_text_pipeline/PAIRED_CONTROL_BENCH.md`](brain_text_pipeline/PAIRED_CONTROL_BENCH.md).
 
 ## Legacy Simulator Quick Start
 

@@ -23,8 +23,10 @@ It implements paired-control evaluation for brain-conditioned language modeling 
 For the exact paper-facing commands, use:
 
 - [`MEG_EXPERIMENT_STEPS.md`](MEG_EXPERIMENT_STEPS.md)
+- [`PAIRED_CONTROL_BENCH.md`](PAIRED_CONTROL_BENCH.md)
 
 That file is the canonical experiment logbook. The README here is only a shorter map.
+`PAIRED_CONTROL_BENCH.md` is the benchmark/protocol view of the same pipeline.
 
 ## What Is Local Only
 
@@ -54,6 +56,35 @@ The main evaluation principle is paired control:
 - `SHUF`: mismatched MEG input
 
 The central claim is not standard autoregressive LM improvement; it is controlled target-word likelihood modulation under paired controls.
+
+## PairedControlBench
+
+The evaluation stack in this directory can be used as a small benchmark/toolkit
+for testing whether any auxiliary conditioning signal is useful rather than
+merely different.
+
+Core components:
+
+- `eval_brain_controls.py`
+  - `REAL / ZERO / SHUF` evaluation and stricter mismatch controls
+- `clustered_paired_controls.py`
+  - clustered bootstrap confidence intervals
+- `analyze_meg_effect_characterization.py`
+  - sub-argmax probability/rank movement and stratified summaries
+- `eval_meg_sensor_ablation.py`
+  - optional coarse sensor-group ablations
+- `run_meg_story_multiseed.sh`
+  - multi-seed robustness for the canonical story-blocked setup
+- `run_paired_control_bench_story.sh`
+  - wrapper that produces the main benchmark outputs for the default MEG case
+
+See [`PAIRED_CONTROL_BENCH.md`](PAIRED_CONTROL_BENCH.md) for:
+
+- protocol definitions
+- failure cases the benchmark detects
+- minimum reporting standard
+- example commands
+- expected output files
 
 ## Minimal Story-Blocked Workflow
 
@@ -155,6 +186,8 @@ After the main story-blocked run, the most important scripts are:
   - appendix table rendering
 - `run_meg_story_multiseed.sh`
   - 3-seed story-blocked robustness + normalization sensitivity
+- `run_paired_control_bench_story.sh`
+  - one-command wrapper for the full story-blocked benchmark bundle
 - `summarize_meg_story_multiseed.py`
   - aggregates the resulting eval JSONs
 
