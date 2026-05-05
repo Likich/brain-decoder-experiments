@@ -40,6 +40,19 @@ def parse_group_keys(text: str | None) -> list[str]:
     return keys
 
 
+def parse_optional_float(value: object) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def meta_key_tuple(meta: dict, keys: list[str]) -> tuple[str, ...]:
     values = []
     for key in keys:
@@ -237,6 +250,8 @@ def build_shuffle_plan(
     metas: list[dict],
     shuf_mode: str,
     shuf_group_keys: list[str],
+    shuf_local_key: str | None,
+    shuf_local_radius: float | None,
     seed: int,
 ) -> dict | None:
     if shuf_mode in {"batch_global", "circular_time_shift", "block_permute", "phase_randomized"}:
@@ -247,6 +262,9 @@ def build_shuffle_plan(
     donor_positions = np.arange(n, dtype=np.int64)
     singleton_groups = 0
     groups_summary: Counter[tuple[str, ...]] | None = None
+    local_missing = 0
+    local_fallback = 0
+    local_exact = 0
 
     if shuf_mode == "global_sample":
         donor_positions = random_derangement(n, rng)
@@ -264,6 +282,41 @@ def build_shuffle_plan(
             local_perm = random_derangement(len(positions), rng)
             pos_arr = np.asarray(positions, dtype=np.int64)
             donor_positions[pos_arr] = pos_arr[local_perm]
+    elif shuf_mode == "within_group_local":
+        if not shuf_group_keys:
+            raise ValueError("--shuf_mode=within_group_local requires --shuf_group_keys")
+        if not shuf_local_key:
+            raise ValueError("--shuf_mode=within_group_local requires --shuf_local_key")
+        if shuf_local_radius is None or shuf_local_radius <= 0:
+            raise ValueError("--shuf_mode=within_group_local requires --shuf_local_radius > 0")
+        groups = {}
+        for pos, meta in enumerate(metas):
+            groups.setdefault(meta_key_tuple(meta, shuf_group_keys), []).append(pos)
+        groups_summary = Counter({k: len(v) for k, v in groups.items()})
+        for positions in groups.values():
+            if len(positions) < 2:
+                singleton_groups += 1
+                continue
+            values = [parse_optional_float(metas[pos].get(shuf_local_key)) for pos in positions]
+            for local_pos, pos in enumerate(positions):
+                anchor = values[local_pos]
+                if anchor is None:
+                    local_missing += 1
+                    candidates = [other for other in positions if other != pos]
+                else:
+                    candidates = [
+                        other
+                        for other, other_value in zip(positions, values)
+                        if other != pos and other_value is not None and abs(other_value - anchor) <= shuf_local_radius
+                    ]
+                    if candidates:
+                        local_exact += 1
+                    else:
+                        local_fallback += 1
+                        candidates = [other for other in positions if other != pos]
+                if not candidates:
+                    continue
+                donor_positions[pos] = int(rng.choice(np.asarray(candidates, dtype=np.int64)))
     else:
         raise ValueError(f"shuffle plan does not apply to mode {shuf_mode!r}")
 
@@ -276,6 +329,12 @@ def build_shuffle_plan(
     }
     if shuf_group_keys:
         plan["group_keys"] = shuf_group_keys
+    if shuf_mode == "within_group_local":
+        plan["local_key"] = shuf_local_key
+        plan["local_radius"] = float(shuf_local_radius)
+        plan["local_missing"] = int(local_missing)
+        plan["local_fallback"] = int(local_fallback)
+        plan["local_exact"] = int(local_exact)
     if groups_summary is not None:
         plan["n_groups"] = int(len(groups_summary))
         plan["largest_groups"] = [
@@ -422,13 +481,23 @@ def main() -> None:
     ap.add_argument("--control_feature_end", type=int, default=None)
     ap.add_argument(
         "--shuf_mode",
-        choices=["batch_global", "global_sample", "within_group", "circular_time_shift", "block_permute", "phase_randomized"],
+        choices=[
+            "batch_global",
+            "global_sample",
+            "within_group",
+            "within_group_local",
+            "circular_time_shift",
+            "block_permute",
+            "phase_randomized",
+        ],
         default="batch_global",
         help=(
             "How to construct SHUF. "
             "'batch_global' reproduces the original within-batch permutation. "
             "'global_sample' permutes across the entire sampled set. "
             "'within_group' permutes within metadata groups given by --shuf_group_keys. "
+            "'within_group_local' additionally keeps donors within a local neighborhood given by "
+            "--shuf_local_key/--shuf_local_radius. "
             "Temporal modes operate within each example."
         ),
     )
@@ -436,7 +505,22 @@ def main() -> None:
         "--shuf_group_keys",
         type=str,
         default=None,
-        help="Comma-separated metadata keys for --shuf_mode=within_group, e.g. subject or subject,session.",
+        help=(
+            "Comma-separated metadata keys for --shuf_mode=within_group or "
+            "--shuf_mode=within_group_local, e.g. subject or subject,sound."
+        ),
+    )
+    ap.add_argument(
+        "--shuf_local_key",
+        type=str,
+        default=None,
+        help="Numeric metadata key for --shuf_mode=within_group_local, e.g. word_index or onset_sec.",
+    )
+    ap.add_argument(
+        "--shuf_local_radius",
+        type=float,
+        default=None,
+        help="Maximum absolute difference in --shuf_local_key for --shuf_mode=within_group_local.",
     )
     ap.add_argument(
         "--shuf_block_size",
@@ -479,6 +563,8 @@ def main() -> None:
         metas=sampled_metas,
         shuf_mode=args.shuf_mode,
         shuf_group_keys=shuf_group_keys,
+        shuf_local_key=args.shuf_local_key,
+        shuf_local_radius=args.shuf_local_radius,
         seed=args.seed,
     )
     temporal_rng = np.random.default_rng(args.seed)
@@ -527,7 +613,7 @@ def main() -> None:
                 perm = torch.randperm(brain_seq.size(0), device=device)
                 shuf_brain_seq = shuffled_control(brain_seq, perm, control_slice)
                 shuf_mask = brain_mask if control_slice is not None else brain_mask[perm]
-            elif args.shuf_mode in {"global_sample", "within_group"}:
+            elif args.shuf_mode in {"global_sample", "within_group", "within_group_local"}:
                 assert shuffle_plan is not None
                 donor_positions = shuffle_plan["donor_positions"][i : i + len(batch_indices)]
                 donor_dataset_indices = [idxs[int(pos)] for pos in donor_positions]

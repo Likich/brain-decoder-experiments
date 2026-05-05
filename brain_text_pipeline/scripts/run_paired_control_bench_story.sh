@@ -48,6 +48,10 @@ EXAMPLES_JSONL="${EXAMPLES_JSONL:-${RUN_DIR}/eval_story_test_50k_examples.jsonl}
 CLUSTERED_JSON="${CLUSTERED_JSON:-${RUN_DIR}/eval_story_test_50k_clustered.json}"
 CHAR_JSON="${CHAR_JSON:-${RUN_DIR}/eval_story_test_50k_characterization.json}"
 SENSOR_JSON="${SENSOR_JSON:-${RUN_DIR}/eval_story_test_50k_sensor_ablation.json}"
+COVARIATE_JSON="${COVARIATE_JSON:-${RUN_DIR}/eval_story_test_50k_covariate_controls.json}"
+LOCAL_TIME_JSON="${LOCAL_TIME_JSON:-${RUN_DIR}/eval_story_test_50k_shuf_subject_sound_local.json}"
+LOCAL_TIME_KEY="${LOCAL_TIME_KEY:-word_index}"
+LOCAL_TIME_RADIUS="${LOCAL_TIME_RADIUS:-32}"
 
 run_eval() {
   local out_json="$1"
@@ -101,6 +105,12 @@ run_if_missing "${CHAR_JSON}" \
   --train_manifest "${TRAIN_MANIFEST}" \
   --out_json "${CHAR_JSON}"
 
+run_if_missing "${COVARIATE_JSON}" \
+  "${PYTHON_BIN}" brain_text_pipeline/scripts/analyze_meg_covariate_controls.py \
+  --examples_jsonl "${EXAMPLES_JSONL}" \
+  --train_manifest "${TRAIN_MANIFEST}" \
+  --out_json "${COVARIATE_JSON}"
+
 run_eval "${RUN_DIR}/eval_story_test_50k_globalshuf.json" \
   --shuf_mode global_sample
 
@@ -111,6 +121,12 @@ run_eval "${RUN_DIR}/eval_story_test_50k_shuf_subject.json" \
 run_eval "${RUN_DIR}/eval_story_test_50k_shuf_sound.json" \
   --shuf_mode within_group \
   --shuf_group_keys sound
+
+run_eval "${LOCAL_TIME_JSON}" \
+  --shuf_mode within_group_local \
+  --shuf_group_keys subject,sound \
+  --shuf_local_key "${LOCAL_TIME_KEY}" \
+  --shuf_local_radius "${LOCAL_TIME_RADIUS}"
 
 run_eval "${RUN_DIR}/eval_story_test_50k_shuf_circshift.json" \
   --shuf_mode circular_time_shift

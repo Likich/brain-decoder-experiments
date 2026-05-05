@@ -72,11 +72,17 @@ toolkit:
   - coarse sensor-group ablations
 - `run_meg_story_multiseed.sh`
   - multi-seed robustness and normalization sensitivity
+- `run_meg_subject_multiseed.sh`
+  - multi-seed robustness for the subject-blocked MEG split
 - `brain_text_pipeline/scripts/run_paired_control_bench_story.sh`
   - one-command wrapper for the core story-blocked benchmark outputs
+- `analyze_meg_covariate_controls.py`
+  - nuisance-balanced post-hoc evaluation over subject, sound, frequency, length, and position bins
 
 The protocol and expected outputs are documented in
 [`brain_text_pipeline/PAIRED_CONTROL_BENCH.md`](brain_text_pipeline/PAIRED_CONTROL_BENCH.md).
+The stricter mismatch family now also includes a same-subject+same-sound
+local-time SHUF mode for nuisance-preserving evaluation.
 
 ## Legacy Simulator Quick Start
 

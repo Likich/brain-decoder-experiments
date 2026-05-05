@@ -447,6 +447,28 @@ python3 brain_text_pipeline/scripts/eval_brain_controls.py \
   --out_json brain_text_pipeline/runs/t5_meg_postword_story_hybrid_last1/eval_story_test_50k_shuf_sound.json
 ```
 
+Same-subject + same-sound local-time SHUF:
+
+```bash
+python3 brain_text_pipeline/scripts/eval_brain_controls.py \
+  --model_name_or_path brain_text_pipeline/runs/t5_meg_postword_story_hybrid_last1 \
+  --brain_encoder_ckpt brain_text_pipeline/runs/t5_meg_postword_story_hybrid_last1/brain_encoder.pt \
+  --meg_dataset_path brain_text_pipeline/data/meg_aligned_postword_story_test/manifest.json \
+  --samples 50000 \
+  --batch_size 32 \
+  --device cuda \
+  --decoder_context_mode target_only \
+  --brain_norm per_example \
+  --max_text_len 8 \
+  --max_brain_len 120 \
+  --seed 42 \
+  --shuf_mode within_group_local \
+  --shuf_group_keys subject,sound \
+  --shuf_local_key word_index \
+  --shuf_local_radius 32 \
+  --out_json brain_text_pipeline/runs/t5_meg_postword_story_hybrid_last1/eval_story_test_50k_shuf_subject_sound_local.json
+```
+
 Circular time shift, local block shuffle, and phase-randomized MEG:
 
 ```bash
@@ -568,6 +590,18 @@ python3 brain_text_pipeline/scripts/eval_brain_controls.py \
   --max_brain_len 120 \
   --seed 42 \
   --out_json brain_text_pipeline/runs/t5_meg_postword_subject_hybrid_last1/eval_subject_test_50k.json
+```
+
+Subject-blocked 3-seed rerun:
+
+```bash
+bash brain_text_pipeline/scripts/run_meg_subject_multiseed.sh
+```
+
+This writes a summary JSON at:
+
+```text
+brain_text_pipeline/runs/t5_meg_postword_subject_hybrid_last1_multiseed_summary.json
 ```
 
 ## Step 5: Leave-One-Subject-Out (Optional, Slower)

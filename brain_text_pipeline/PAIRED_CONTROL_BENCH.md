@@ -75,6 +75,31 @@ Recommended additions:
 - nuisance-preserving `SHUF` variants
 - ablations showing where the signal matters
 
+## Benchmark API
+
+A benchmark run in `PairedControlBench` is defined by four ingredients:
+
+1. a fixed model checkpoint
+2. a held-out evaluation manifest
+3. one matched auxiliary stream (`REAL`)
+4. two control streams:
+   - a removal control (`ZERO`)
+   - at least one mismatch control (`SHUF`)
+
+The canonical JSON output should expose:
+
+- `delta_real_zero`
+- `delta_real_shuf`
+- `js_real`
+- `js_shuf`
+- `top1_real_zero`
+- `top1_shuf_zero`
+- paired confidence intervals
+- control-construction metadata such as `shuf_mode` and grouping keys
+
+This is the smallest stable API that lets different auxiliary-conditioning
+methods be compared under the same protocol.
+
 ## Core Story-Blocked Benchmark
 
 In this repository, the canonical benchmark instance is the story-blocked
@@ -92,7 +117,9 @@ This runs the core benchmark outputs for the default story-blocked model:
 - per-example export
 - clustered bootstrap
 - characterization analysis
+- covariate-balanced post-hoc analysis
 - stricter SHUF family
+- same-subject+same-sound local-time SHUF
 - optional sensor ablation if `MEG_ROOT` is provided
 
 ## Example Commands
@@ -145,6 +172,8 @@ The benchmark supports several mismatch controls:
 - `batch_global`
 - `global_sample`
 - `within_group` with keys like `subject`, `sound`, or `subject,session`
+- `within_group_local` with keys like `subject,sound` plus a local key such as
+  `word_index` or `onset_sec`
 - `circular_time_shift`
 - `block_permute`
 - `phase_randomized`
@@ -167,6 +196,28 @@ python3 brain_text_pipeline/scripts/eval_brain_controls.py \
   --shuf_mode within_group \
   --shuf_group_keys subject \
   --out_json brain_text_pipeline/runs/t5_meg_postword_story_hybrid_last1/eval_story_test_50k_shuf_subject.json
+```
+
+Stricter local-time nuisance-preserving mismatch:
+
+```bash
+python3 brain_text_pipeline/scripts/eval_brain_controls.py \
+  --model_name_or_path brain_text_pipeline/runs/t5_meg_postword_story_hybrid_last1 \
+  --brain_encoder_ckpt brain_text_pipeline/runs/t5_meg_postword_story_hybrid_last1/brain_encoder.pt \
+  --meg_dataset_path brain_text_pipeline/data/meg_aligned_postword_story_test/manifest.json \
+  --samples 50000 \
+  --batch_size 32 \
+  --device cuda \
+  --decoder_context_mode target_only \
+  --brain_norm per_example \
+  --max_text_len 8 \
+  --max_brain_len 120 \
+  --seed 42 \
+  --shuf_mode within_group_local \
+  --shuf_group_keys subject,sound \
+  --shuf_local_key word_index \
+  --shuf_local_radius 32 \
+  --out_json brain_text_pipeline/runs/t5_meg_postword_story_hybrid_last1/eval_story_test_50k_shuf_subject_sound_local.json
 ```
 
 ## Expected Outputs

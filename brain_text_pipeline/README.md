@@ -17,6 +17,7 @@ It implements paired-control evaluation for brain-conditioned language modeling 
 - characterization analyses
 - sensor-group ablations
 - multi-seed story-blocked robustness checks
+- multi-seed subject-blocked robustness checks
 
 ## Recommended Starting Point
 
@@ -75,8 +76,12 @@ Core components:
   - optional coarse sensor-group ablations
 - `run_meg_story_multiseed.sh`
   - multi-seed robustness for the canonical story-blocked setup
+- `run_meg_subject_multiseed.sh`
+  - multi-seed robustness for the subject-blocked setup
 - `run_paired_control_bench_story.sh`
   - wrapper that produces the main benchmark outputs for the default MEG case
+- `analyze_meg_covariate_controls.py`
+  - post-hoc nuisance-balanced summaries over subject, sound, length, position, and frequency bins
 
 See [`PAIRED_CONTROL_BENCH.md`](PAIRED_CONTROL_BENCH.md) for:
 
@@ -186,10 +191,14 @@ After the main story-blocked run, the most important scripts are:
   - appendix table rendering
 - `run_meg_story_multiseed.sh`
   - 3-seed story-blocked robustness + normalization sensitivity
+- `run_meg_subject_multiseed.sh`
+  - 3-seed subject-blocked robustness
 - `run_paired_control_bench_story.sh`
   - one-command wrapper for the full story-blocked benchmark bundle
 - `summarize_meg_story_multiseed.py`
   - aggregates the resulting eval JSONs
+- `summarize_meg_subject_multiseed.py`
+  - aggregates the subject-blocked multiseed eval JSONs
 
 ## Auxiliary and Control Pipelines
 
@@ -219,6 +228,7 @@ Examples typically include:
 ## Notes
 
 - The main held-out MEG result depends critically on `brain_norm=per_example`; the cheap `brain_norm=none` sensitivity run collapses the paired-control effect.
+- The strongest nuisance-preserving SHUFs now include a same-subject+same-sound local-time control via `--shuf_mode within_group_local --shuf_group_keys subject,sound`.
 - The target-only decoder setup is intentional and is used to prevent decoder-context leakage.
 - The main real-data claim is controlled target-word likelihood modulation under paired controls, not standard full-context autoregressive LM improvement.
 - The paper directories are local-only and not tracked in Git; rebuild the paper from your local `paper/` folder if needed.
